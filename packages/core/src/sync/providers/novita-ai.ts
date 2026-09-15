@@ -13,7 +13,9 @@ export const NovitaAIModel = z.object({
 }).passthrough();
 
 export const NovitaAIResponse = z.object({
-  object: z.literal("list"),
+  // Novita's endpoint currently omits the OpenAI-compatible top-level object.
+  // Keep accepting the standard value if the API adds it later.
+  object: z.literal("list").optional(),
   data: z.array(NovitaAIModel),
 }).passthrough();
 

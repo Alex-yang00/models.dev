@@ -18,7 +18,6 @@ function novitaAiModel(overrides: Partial<NovitaAIModel> = {}): NovitaAIModel {
 
 test("parses Novita AI API response", () => {
   const parsed = NovitaAIResponse.parse({
-    object: "list",
     data: [
       novitaAiModel(),
       novitaAiModel({ id: "meta-llama/llama-3.3-70b-instruct", created: 1_733_635_200 }),
@@ -27,6 +26,10 @@ test("parses Novita AI API response", () => {
   expect(parsed.data).toHaveLength(2);
   expect(parsed.data[0]?.id).toBe("deepseek/deepseek-v3.2");
   expect(parsed.data[1]?.id).toBe("meta-llama/llama-3.3-70b-instruct");
+});
+
+test("accepts the standard OpenAI list marker when present", () => {
+  expect(NovitaAIResponse.parse({ object: "list", data: [novitaAiModel()] }).data).toHaveLength(1);
 });
 
 test("rejects invalid Novita AI API responses", () => {
