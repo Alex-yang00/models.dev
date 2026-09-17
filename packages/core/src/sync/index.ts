@@ -84,6 +84,8 @@ export interface SyncProvider<SourceModel> {
   skipCreates?: boolean;
   /** Report remote-only models skipped by skipCreates as GitHub issues. */
   trackMissingModels?: boolean;
+  /** Maximum share of existing files that may disappear in one sync. */
+  maxMissingFraction?: number;
   deleteMissing?: boolean;
   preserveSymlinks?: boolean;
   preserveBaseModels?: boolean;
@@ -97,6 +99,8 @@ export interface SyncProvider<SourceModel> {
    * undefined to skip silently (no notice, no missing-model issue).
    */
   sourceID?(model: SourceModel): string | undefined;
+  /** Track an untranslatable remote model without deleting an existing local entry. */
+  missingModelID?(model: SourceModel): string | undefined;
   skippedNotice?(ids: string[]): string[];
   fetchModels(): Promise<unknown>;
   parseModels(raw: unknown): SourceModel[];
@@ -259,6 +263,7 @@ export async function syncProvider<SourceModel>(
   const caseNormalizedDesiredPaths = new Map<string, string>();
   const desiredMetadata = new Map<string, { model: z.infer<typeof ModelMetadata>; content: string }>();
   const skippedRemote: string[] = [];
+  const missingRemote = new Set<string>();
   const missingReasoning = new Map<string, string>();
 
   for (const sourceModel of sourceModels) {
@@ -281,6 +286,8 @@ export async function syncProvider<SourceModel>(
     if (translated === undefined) {
       const skippedID = provider.sourceID?.(sourceModel);
       if (skippedID !== undefined) skippedRemote.push(skippedID);
+      const missingID = provider.missingModelID?.(sourceModel);
+      if (missingID !== undefined) missingRemote.add(missingID);
       continue;
     }
 
@@ -365,6 +372,18 @@ export async function syncProvider<SourceModel>(
       content: header + formatToml(parsed.data),
       header,
     });
+  }
+
+  if (provider.deleteMissing !== false && provider.maxMissingFraction !== undefined) {
+    if (provider.maxMissingFraction < 0 || provider.maxMissingFraction > 1) {
+      throw new Error(`Invalid maxMissingFraction for ${provider.id}`);
+    }
+    const absent = [...existing.keys()].filter((file) =>
+      !desired.has(file) && !missingRemote.has(file.slice(0, -5)) && !missingReasoning.has(file.slice(0, -5))
+    ).length;
+    if (existing.size > 0 && absent / existing.size > provider.maxMissingFraction) {
+      throw new Error(`${provider.id} sync would delete ${absent}/${existing.size} existing models; refusing unusually large catalog shrink`);
+    }
   }
 
   const files: SyncResult["files"] = [];
@@ -460,6 +479,10 @@ export async function syncProvider<SourceModel>(
   const missingLocal: string[] = [];
   for (const relativePath of new Set([...existing.keys(), ...brokenSymlinks])) {
     if (desired.has(relativePath)) continue;
+    if (missingRemote.has(relativePath.slice(0, -5))) {
+      unchanged++;
+      continue;
+    }
     if (missingReasoning.has(relativePath.slice(0, -5))) {
       unchanged++;
       continue;
@@ -492,6 +515,7 @@ export async function syncProvider<SourceModel>(
   ];
 
   const issueModels = [
+    ...missingRemote,
     ...(provider.skipCreates === true ? skippedRemote : []),
     ...missingReasoning.keys(),
   ];

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { groups, providers, syncProvider } from "../src/sync/index.js";
+import { groups, providers, syncProvider, type ExistingModel } from "../src/sync/index.js";
 import { fetchNovitaAIModels, NovitaAIResponse, novitaAi, type NovitaAIModel } from "../src/sync/providers/novita-ai.js";
 
 function novitaAiModel(overrides: Partial<NovitaAIModel> = {}): NovitaAIModel {
@@ -54,14 +54,57 @@ test("maps Novita catalog metadata onto existing models", () => {
 });
 
 test("rejects invalid Novita AI API responses", () => {
+  expect(() => NovitaAIResponse.parse({ data: [] })).toThrow();
   expect(() => NovitaAIResponse.parse({ object: "list", data: [{ id: "bad", object: "not-model", created: 1, owned_by: "" }] }))
     .toThrow();
   expect(() => NovitaAIResponse.parse({ object: "list", data: [{ id: "", object: "model", created: -1, owned_by: "" }] }))
     .toThrow();
 });
 
+test("Novita AI sync retains prices absent from the API", () => {
+  const existing = {
+    base_model: "deepseek/deepseek-v3",
+    cost: { input: 1, output: 2, cache_read: 0.2, cache_write: 1.5625, input_audio: 2.2, output_audio: 1.788, reasoning: 0.4 },
+  };
+  const result = novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek-v3", features: [],
+    pricing: { prompt: { price_per_m_decimal: "0.7" }, completion: { price_per_m_decimal: "1.5" }, input_cache_read: { price_per_m_decimal: "0.1" } },
+  }), { authored: () => existing, existing: () => existing });
+  expect(result?.model.cost).toMatchObject({
+    input: 0.7, output: 1.5, cache_read: 0.1, cache_write: 1.5625,
+    input_audio: 2.2, output_audio: 1.788, reasoning: 0.4,
+  });
+});
+
+test("Novita AI sync preserves optional tier prices only at matching thresholds", () => {
+  const existing = {
+    base_model: "deepseek/deepseek-v3",
+    cost: {
+      input: 1, output: 2, cache_write: 0.3, input_audio: 2.2,
+      tiers: [{ tier: { type: "context" as const, size: 256_000 }, input: 3, output: 4, cache_write: 0.7 },
+        { tier: { type: "context" as const, size: 500_000 }, input: 5, output: 6, cache_write: 0.9 }],
+    },
+  };
+  const result = novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek-v3", features: [], is_tiered_billing: true,
+    tiered_billing_configs: [
+      { min_tokens: 1, max_tokens: 256_000, pricing: { prompt: { price_per_m_decimal: "1.5" }, completion: { price_per_m_decimal: "2.5" } } },
+      { min_tokens: 256_000, max_tokens: 750_000, pricing: { prompt: { price_per_m_decimal: "3.5" }, completion: { price_per_m_decimal: "4.5" } } },
+      { min_tokens: 750_000, max_tokens: 1_000_000, pricing: { prompt: { price_per_m_decimal: "5.5" }, completion: { price_per_m_decimal: "6.5" } } },
+    ],
+  }), { authored: () => existing, existing: () => existing });
+  expect(result?.model.cost).toMatchObject({
+    input: 1.5, output: 2.5, cache_write: 0.3, input_audio: 2.2,
+    tiers: [
+      { tier: { size: 256_000 }, input: 3.5, output: 4.5, cache_write: 0.7 },
+      { tier: { size: 750_000 }, input: 5.5, output: 6.5 },
+    ],
+  });
+  expect(result?.model.cost?.tiers?.[1]?.cache_write).toBeUndefined();
+});
+
 test("Novita AI sync preserves authored metadata for existing models", () => {
-  const authored = {
+  const authored: ExistingModel = {
     base_model: "deepseek/deepseek-v3.2",
     name: "Deepseek V3.2",
     description: "DeepSeek chat model for instruction following, coding, and analysis",
@@ -124,6 +167,7 @@ test("Novita AI sync treats explicit zero prices without tiers as free", () => {
   expect(translated?.model).toMatchObject({
     base_model: "inclusionai/ling-3.0-flash-fin", cost: { input: 0, output: 0 },
   });
+  expect(translated?.model.cost).not.toHaveProperty("base_model");
 });
 
 test("Novita AI sync does not mistake tier-only pricing for free", () => {
@@ -242,6 +286,7 @@ test("Novita AI sync removes local models absent from API response", async () =>
     const result = await syncProvider({
       ...novitaAi,
       modelsDir,
+      maxMissingFraction: 1,
       async fetchModels() {
         return {
           object: "list",
@@ -256,11 +301,57 @@ test("Novita AI sync removes local models absent from API response", async () =>
   }
 });
 
+test("Novita AI sync refuses a partial response before updating any files", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "sync-novita-guard-"));
+  const modelsDir = path.join(dir, "providers", "novita-ai", "models");
+  const file = path.join(modelsDir, "novita", "custom.toml");
+  const other = path.join(modelsDir, "novita", "other.toml");
+  const content = 'name = "Custom"\ndescription = "Custom hosted model"\nrelease_date = "2025-01-01"\nlast_updated = "2025-01-01"\nattachment = false\nreasoning = false\ntool_call = false\nopen_weights = false\n\n[cost]\ninput = 1\noutput = 2\n\n[limit]\ncontext = 8192\noutput = 4096\n\n[modalities]\ninput = ["text"]\noutput = ["text"]\n';
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await mkdir(path.dirname(other), { recursive: true });
+    await Bun.write(file, content);
+    await Bun.write(other, content);
+    await expect(syncProvider({
+      ...novitaAi, modelsDir, maxMissingFraction: 0.49,
+      async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom", features: [], pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } })] }; },
+    })).rejects.toThrow("would delete 1/2 existing models");
+    expect(await Bun.file(file).text()).toBe(content);
+    expect(await Bun.file(other).text()).toBe(content);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Novita AI sync keeps local files when translation skips an existing remote ID", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "sync-novita-skip-"));
+  const modelsDir = path.join(dir, "providers", "novita-ai", "models");
+  const file = path.join(modelsDir, "novita", "custom.toml");
+  const content = 'name = "Custom"\ndescription = "Custom hosted model"\nrelease_date = "2025-01-01"\nlast_updated = "2025-01-01"\nattachment = false\nreasoning = false\ntool_call = false\nopen_weights = false\n\n[cost]\ninput = 1\noutput = 2\n\n[limit]\ncontext = 8192\noutput = 4096\n\n[modalities]\ninput = ["text"]\noutput = ["text"]\n';
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await Bun.write(file, content);
+    const result = await syncProvider({
+      ...novitaAi, modelsDir,
+      async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom" })] }; },
+      translateModel() { return undefined; },
+    }, { dryRun: true, openIssues: true });
+    expect(result.deleted).toBe(0);
+    expect(result.notices.join(" ")).toContain("novita/custom");
+    expect(result.notices.join(" ")).toContain("Would open GitHub issue");
+    expect(await Bun.file(file).text()).toBe(content);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("Novita AI sync tracks remote-only IDs", () => {
   expect(providers["novita-ai"]).toBe(novitaAi);
   expect(groups.aggregators).toContain("novita-ai");
   expect(novitaAi.sourceID?.(novitaAiModel())).toBe("deepseek/deepseek-v3.2");
   expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/new-model" }))).toBe("novita/new-model");
+  expect(novitaAi.trackMissingModels).toBe(true);
+  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model" }))).toBe("novita/new-model");
 });
 
 test("Novita AI sync requires NOVITA_API_KEY", async () => {

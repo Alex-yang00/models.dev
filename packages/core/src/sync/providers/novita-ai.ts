@@ -44,7 +44,7 @@ export const NovitaAIResponse = z.object({
   // Novita's endpoint currently omits the OpenAI-compatible top-level object.
   // Keep accepting the standard value if the API adds it later.
   object: z.literal("list").optional(),
-  data: z.array(NovitaAIModel),
+  data: z.array(NovitaAIModel).min(1),
 }).passthrough();
 
 export type NovitaAIModel = z.infer<typeof NovitaAIModel>;
@@ -70,15 +70,20 @@ function dateFromTimestamp(timestamp: number) {
   return new Date(timestamp * 1000).toISOString().slice(0, 10);
 }
 
-function price(pricing: z.infer<typeof Pricing> | undefined) {
+type Cost = NonNullable<ExistingModel["cost"]>;
+
+function price(pricing: z.infer<typeof Pricing> | undefined, existing?: Cost) {
   const input = decimalPrice(pricing?.prompt?.price_per_m_decimal);
   const output = decimalPrice(pricing?.completion?.price_per_m_decimal);
   if (input === undefined || output === undefined) return undefined;
   return {
     input,
     output,
-    cache_read: decimalPrice(pricing?.input_cache_read?.price_per_m_decimal),
-    cache_write: decimalPrice(pricing?.input_cache_write?.price_per_m_decimal),
+    reasoning: existing?.reasoning,
+    cache_read: decimalPrice(pricing?.input_cache_read?.price_per_m_decimal) ?? existing?.cache_read,
+    cache_write: decimalPrice(pricing?.input_cache_write?.price_per_m_decimal) ?? existing?.cache_write,
+    input_audio: existing?.input_audio,
+    output_audio: existing?.output_audio,
   };
 }
 
@@ -86,20 +91,20 @@ function cost(model: NovitaAIModel, existing: ExistingModel | undefined) {
   if (model.is_tiered_billing !== true) {
     // Novita uses zero top-level prices without a pricing object for free models.
     if (model.pricing === undefined && model.input_token_price_per_m === 0 && model.output_token_price_per_m === 0) {
-      return { input: 0, output: 0 };
+      return { ...existing?.cost, input: 0, output: 0, tiers: undefined };
     }
-    return price(model.pricing) ?? existing?.cost;
+    return price(model.pricing, existing?.cost) ?? existing?.cost;
   }
   const bands = [...model.tiered_billing_configs ?? []].sort((a, b) => a.min_tokens - b.min_tokens);
-  if (bands.length === 0 || bands[0]?.min_tokens > 1 || bands.some((band, index) =>
+  if (bands.length === 0 || bands[0]!.min_tokens > 1 || bands.some((band, index) =>
     band.max_tokens <= band.min_tokens || (index > 0 && band.min_tokens <= bands[index - 1]!.min_tokens)
   )) return existing?.cost;
-  const base = price(bands[0]!.pricing);
+  const base = price(bands[0]!.pricing, existing?.cost);
   if (base === undefined || bands.some((band) => price(band.pricing) === undefined)) return existing?.cost;
   return {
     ...base,
     tiers: bands.slice(1).map((band) => ({
-      ...price(band.pricing)!,
+      ...price(band.pricing, existing?.cost?.tiers?.find((tier) => tier.tier.size === band.min_tokens))!,
       tier: { type: "context" as const, size: band.min_tokens },
     })),
   };
@@ -124,7 +129,7 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
-    description: model.description || existing?.description || describeModel({ id: model.id, name, reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? false, limit: { context, output: outputLimit }, modalities: { input, output } }),
+    description: existing?.description || model.description || describeModel({ id: model.id, name, reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? false, limit: { context, output: outputLimit }, modalities: { input, output } }),
     family: existing?.family,
     release_date: existing?.release_date ?? dateFromTimestamp(model.created),
     last_updated: existing?.last_updated ?? dateFromTimestamp(model.created),
@@ -158,7 +163,7 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   } as SyncedModel;
 }
 
-export async function fetchNovitaAIModels(key: string, fetcher: typeof fetch = fetch) {
+export async function fetchNovitaAIModels(key: string, fetcher: (url: string, init?: RequestInit) => Promise<Response> = fetch) {
   const response = await fetcher(API_ENDPOINT, {
     method: "GET",
     headers: { Authorization: `Bearer ${key}` },
@@ -177,7 +182,11 @@ export const novitaAi = {
   // The endpoint exposes the metadata needed to author new provider models.
   skipCreates: false,
   deleteMissing: true,
-  trackMissingModels: false,
+  trackMissingModels: true,
+  maxMissingFraction: 0.5,
+  missingModelID(model) {
+    return model.id;
+  },
   sourceID(model) {
     return model.id;
   },

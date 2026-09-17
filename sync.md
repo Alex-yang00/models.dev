@@ -163,6 +163,13 @@ CrossModel is implemented in `packages/core/src/sync/providers/crossmodel.ts`.
 - `structured_output` comes from `capabilities.json`; when that field is absent, the sync preserves an existing authored override.
 - Other intrinsic model facts remain inherited from the canonical `base_model` metadata.
 
+## Novita AI Notes
+
+- Novita AI uses the authenticated `https://api.novita.ai/openai/v1/models` endpoint as the complete served-model catalog. Set `NOVITA_API_KEY` locally or in the hourly workflow.
+- The endpoint supplies current pricing, modalities, features, and limits; authored audio/reasoning prices and cache prices missing from its response remain intact. Tier-specific optional prices are retained only for an identical context threshold. Explicit zero input/output prices with no pricing or tiers mean a free model.
+- Existing authored descriptions and provider-specific reasoning controls remain curated: the API can truncate descriptions and does not describe each model's reasoning wire controls. New models lacking verified lab metadata, usable prices, or reasoning controls are skipped and tracked through deduped missing-model issues in GitHub Actions.
+- An empty response is rejected; a run removing more than half the existing catalog fails before any files are written. Smaller removals follow the complete remote catalog.
+
 ## OpenRouter Notes
 
 OpenRouter is implemented in `packages/core/src/sync/providers/openrouter.ts`.

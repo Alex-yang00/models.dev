@@ -16,7 +16,7 @@ function issueTitle(providerId: string, modelId: string) {
 function issueBody(provider: MissingModelIssueTarget, modelId: string, reason?: string) {
   return [
     reason === undefined
-      ? `The **${provider.name}** catalog sync found remote model \`${modelId}\` that is not in the local catalog.`
+      ? `The **${provider.name}** catalog sync cannot automatically translate remote model \`${modelId}\`. Any existing local entry was left unchanged.`
       : `The **${provider.name}** catalog sync is missing reasoning options for remote model \`${modelId}\`. Any existing local entry was left unchanged.`,
     "",
     `| Field | Value |`,
@@ -26,7 +26,7 @@ function issueBody(provider: MissingModelIssueTarget, modelId: string, reason?: 
     `| Expected path | \`${provider.modelsDir}/${modelId}.toml\` |`,
     "",
     reason === undefined
-      ? "This provider uses `skipCreates` because the remote source is not enough to auto-author a full TOML."
+      ? "The remote source does not provide enough verified metadata to auto-author a full TOML."
       : `Sync diagnostic: ${reason}`,
     "Add the model manually (prefer `base_model` when matching `models/` metadata exists).",
     ...(reason === undefined ? [] : [
