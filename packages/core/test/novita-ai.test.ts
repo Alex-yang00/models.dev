@@ -196,6 +196,36 @@ test("Novita AI sync reuses a verified lab alias and fixed R1 controls", () => {
   }), context)?.model).toMatchObject({ base_model: "deepseek/deepseek-r1", reasoning_options: [] });
 });
 
+test("Novita AI sync updates V4.1 Flash prices while retaining its verified toggle", () => {
+  const authored: ExistingModel = {
+    base_model: "deepseek/deepseek-v4.1-flash",
+    reasoning_options: [{ type: "toggle" }],
+    interleaved: { field: "reasoning_content" },
+    cost: { input: 1, output: 2 },
+  };
+  const translated = novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek-v4.1-flash",
+    context_size: 1_048_576,
+    max_output_tokens: 393_216,
+    features: ["reasoning", "function-calling", "structured-outputs"],
+    input_modalities: ["text", "image"],
+    output_modalities: ["text"],
+    pricing: {
+      prompt: { price_per_m_decimal: "0.3" },
+      completion: { price_per_m_decimal: "1.2" },
+      input_cache_read: { price_per_m_decimal: "0.006" },
+    },
+  }), { authored: () => authored, existing: () => authored });
+  expect(translated?.model).toMatchObject({
+    base_model: authored.base_model,
+    reasoning_options: [{ type: "toggle" }],
+    interleaved: { field: "reasoning_content" },
+    cost: { input: 0.3, output: 1.2, cache_read: 0.006 },
+    limit: { context: 1_048_576, output: 393_216 },
+  });
+  expect(translated?.model).not.toHaveProperty("description");
+});
+
 test("Novita AI sync maps tiered context prices and cache-write", () => {
   const pricing = (input: string, output: string, cacheWrite: string) => ({
     prompt: { price_per_m_decimal: input },

@@ -145,6 +145,8 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   };
   if (baseModel !== undefined) return factorBaseModel(baseModel, {
     ...values,
+    // An empty catalog description is not a provider-specific override.
+    description: existing?.description || model.description || undefined,
     // These are lab facts, not claims made by the Novita catalog endpoint.
     open_weights: existing?.open_weights,
     release_date: existing?.release_date,
