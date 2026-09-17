@@ -98,7 +98,7 @@ test("Novita AI sync creates unknown remote models from API metadata", () => {
   expect(translated?.model).toMatchObject({ limit: { context: 8192, output: 4096 }, cost: { input: 0.1, output: 0.2 } });
 });
 
-test("Novita AI sync retains local models absent from API response", async () => {
+test("Novita AI sync removes local models absent from API response", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "sync-novita-ai-"));
   const modelsDir = path.join(dir, "providers", "novita-ai", "models");
   await mkdir(modelsDir, { recursive: true });
@@ -145,9 +145,8 @@ test("Novita AI sync retains local models absent from API response", async () =>
         };
       },
     });
-    expect(result.deleted).toBe(0);
-    expect(result.unchanged).toBe(1);
-    expect(await Bun.file(path.join(modelsDir, "deepseek", "deepseek-v3.2.toml")).exists()).toBe(true);
+    expect(result.deleted).toBe(1);
+    expect(await Bun.file(path.join(modelsDir, "deepseek", "deepseek-v3.2.toml")).exists()).toBe(false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

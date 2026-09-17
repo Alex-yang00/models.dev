@@ -125,7 +125,7 @@ export const novitaAi = {
   modelsDir: "providers/novita-ai/models",
   // The endpoint exposes the metadata needed to author new provider models.
   skipCreates: false,
-  deleteMissing: false,
+  deleteMissing: true,
   sourceID(model) {
     return model.id;
   },
