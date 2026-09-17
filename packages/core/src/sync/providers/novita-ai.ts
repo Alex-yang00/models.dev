@@ -5,6 +5,9 @@ import type { ExistingModel, SyncProvider, SyncedFullModel, SyncedModel } from "
 import { factorBaseModel, resolveModelMetadataBaseModel } from "./openrouter.js";
 
 const API_ENDPOINT = "https://api.novita.ai/openai/v1/models";
+const BASE_MODEL_ALIASES: Record<string, string> = {
+  "deepseek/deepseek_v3": "deepseek/deepseek-v3",
+};
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
 const Pricing = z.object({
   prompt: Price.optional(),
@@ -18,6 +21,8 @@ export const NovitaAIModel = z.object({
   object: z.literal("model"),
   created: z.number().int().nonnegative(),
   owned_by: z.string(),
+  input_token_price_per_m: z.number().optional(),
+  output_token_price_per_m: z.number().optional(),
   title: z.string().optional(),
   display_name: z.string().optional(),
   description: z.string().optional(),
@@ -78,7 +83,13 @@ function price(pricing: z.infer<typeof Pricing> | undefined) {
 }
 
 function cost(model: NovitaAIModel, existing: ExistingModel | undefined) {
-  if (model.is_tiered_billing !== true) return price(model.pricing) ?? existing?.cost;
+  if (model.is_tiered_billing !== true) {
+    // Novita uses zero top-level prices without a pricing object for free models.
+    if (model.pricing === undefined && model.input_token_price_per_m === 0 && model.output_token_price_per_m === 0) {
+      return { input: 0, output: 0 };
+    }
+    return price(model.pricing) ?? existing?.cost;
+  }
   const bands = [...model.tiered_billing_configs ?? []].sort((a, b) => a.min_tokens - b.min_tokens);
   if (bands.length === 0 || bands[0]?.min_tokens > 1 || bands.some((band, index) =>
     band.max_tokens <= band.min_tokens || (index > 0 && band.min_tokens <= bands[index - 1]!.min_tokens)
@@ -95,7 +106,7 @@ function cost(model: NovitaAIModel, existing: ExistingModel | undefined) {
 }
 
 function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefined, resolved: ExistingModel | undefined): SyncedModel | undefined {
-  const baseModel = existing?.base_model ?? resolveModelMetadataBaseModel(model.id);
+  const baseModel = existing?.base_model ?? BASE_MODEL_ALIASES[model.id] ?? resolveModelMetadataBaseModel(model.id);
   // New provider entries require a lab model. Do not create fabricated inline lab facts.
   if (existing === undefined && baseModel === undefined) return undefined;
   const name = model.display_name ?? model.title ?? existing?.name ?? model.id;
@@ -108,8 +119,9 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const context = model.context_size ?? resolved?.limit?.context ?? 0;
   const outputLimit = model.max_output_tokens ?? resolved?.limit?.output ?? context;
   const modelCost = cost(model, existing);
-  // A missing price is unknown, not free. Neither can we infer API reasoning controls.
-  if (existing === undefined && (modelCost === undefined || reasoning)) return undefined;
+  // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
+  const reasoningOptions = existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
+  if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
     description: model.description || existing?.description || describeModel({ id: model.id, name, reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? false, limit: { context, output: outputLimit }, modalities: { input, output } }),
@@ -133,7 +145,7 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
     release_date: existing?.release_date,
     last_updated: existing?.last_updated,
     temperature: existing?.temperature,
-    reasoning_options: existing?.reasoning_options,
+    reasoning_options: reasoningOptions,
     interleaved: existing?.interleaved,
   }, values.limit, existing?.base_model_omit);
   return {

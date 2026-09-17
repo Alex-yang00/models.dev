@@ -111,6 +111,47 @@ test("Novita AI sync skips new models with unknown lab, price, or reasoning cont
   expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", features: ["reasoning"], pricing: price }), context)).toBeUndefined();
 });
 
+test("Novita AI sync treats explicit zero prices without tiers as free", () => {
+  const model = novitaAiModel({
+    id: "inclusionai/ling-3.0-flash-fin",
+    input_token_price_per_m: 0,
+    output_token_price_per_m: 0,
+    features: ["reasoning"],
+  });
+  expect(novitaAi.translateModel(model, { existing: () => undefined, authored: () => undefined })).toBeUndefined();
+  const authored = { base_model: "inclusionai/ling-3.0-flash-fin", reasoning_options: [] };
+  const translated = novitaAi.translateModel(model, { existing: () => authored, authored: () => authored });
+  expect(translated?.model).toMatchObject({
+    base_model: "inclusionai/ling-3.0-flash-fin", cost: { input: 0, output: 0 },
+  });
+});
+
+test("Novita AI sync does not mistake tier-only pricing for free", () => {
+  const translated = novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek-v3",
+    input_token_price_per_m: 0,
+    output_token_price_per_m: 0,
+    is_tiered_billing: true,
+    features: [],
+    tiered_billing_configs: [{
+      min_tokens: 1, max_tokens: 10_000,
+      pricing: { prompt: { price_per_m_decimal: "0.5" }, completion: { price_per_m_decimal: "2" } },
+    }],
+  }), { existing: () => undefined, authored: () => undefined });
+  expect(translated?.model).toMatchObject({ cost: { input: 0.5, output: 2 } });
+});
+
+test("Novita AI sync reuses a verified lab alias and fixed R1 controls", () => {
+  const context = { existing: () => undefined, authored: () => undefined };
+  const pricing = { prompt: { price_per_m_decimal: "0.89" }, completion: { price_per_m_decimal: "0.89" } };
+  expect(novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek_v3", features: [], pricing,
+  }), context)?.model).toMatchObject({ base_model: "deepseek/deepseek-v3" });
+  expect(novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek-r1", features: ["reasoning"], pricing,
+  }), context)?.model).toMatchObject({ base_model: "deepseek/deepseek-r1", reasoning_options: [] });
+});
+
 test("Novita AI sync maps tiered context prices and cache-write", () => {
   const pricing = (input: string, output: string, cacheWrite: string) => ({
     prompt: { price_per_m_decimal: input },
