@@ -161,7 +161,8 @@ test("Novita AI sync treats explicit zero prices without tiers as free", () => {
     output_token_price_per_m: 0,
     features: ["reasoning"],
   });
-  expect(novitaAi.translateModel(model, { existing: () => undefined, authored: () => undefined })).toBeUndefined();
+  expect(novitaAi.translateModel(model, { existing: () => undefined, authored: () => undefined })?.model)
+    .toMatchObject({ base_model: "inclusionai/ling-3.0-flash-fin", reasoning_options: [{ type: "toggle" }], cost: { input: 0, output: 0 } });
   const authored = { base_model: "inclusionai/ling-3.0-flash-fin", reasoning_options: [] };
   const translated = novitaAi.translateModel(model, { existing: () => authored, authored: () => authored });
   expect(translated?.model).toMatchObject({
@@ -224,6 +225,20 @@ test("Novita AI sync updates V4.1 Flash prices while retaining its verified togg
     limit: { context: 1_048_576, output: 393_216 },
   });
   expect(translated?.model).not.toHaveProperty("description");
+});
+
+test("Novita AI sync creates only explicitly verified new reasoners", () => {
+  const context = { authored: () => undefined, existing: () => undefined };
+  const pricing = { prompt: { price_per_m_decimal: "0.15" }, completion: { price_per_m_decimal: "0.5" } };
+  for (const id of ["qwen/qwen3.8-flash", "minimax/minimax-m3", "zai-org/glm-5.3", "deepseek/deepseek-v4-flash-0731"]) {
+    const translated = novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context);
+    expect(translated?.model).toMatchObject({ reasoning_options: [{ type: "toggle" }], interleaved: { field: "reasoning_content" } });
+    expect(translated?.header).toContain("thinking.type = enabled|disabled");
+    if (id === "zai-org/glm-5.3") expect(translated?.model).not.toHaveProperty("description");
+  }
+  for (const id of ["zai-org/glm-5.3-flash", "deepseek/deepseek-v4-pro-0813", "qwen/qwen3.8-2.4t-a95b"]) {
+    expect(novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context)).toBeUndefined();
+  }
 });
 
 test("Novita AI sync maps tiered context prices and cache-write", () => {

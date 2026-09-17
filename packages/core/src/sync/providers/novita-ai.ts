@@ -8,6 +8,27 @@ const API_ENDPOINT = "https://api.novita.ai/openai/v1/models";
 const BASE_MODEL_ALIASES: Record<string, string> = {
   "deepseek/deepseek_v3": "deepseek/deepseek-v3",
 };
+// Verified per model with Novita chat/completions: disabling thinking removes
+// reasoning_content, while enabling it returns reasoning_content.
+const VERIFIED_THINKING_TOGGLE = new Set([
+  "deepseek/deepseek-v4-flash-0731",
+  "deepseek/deepseek-v4-flash-vision-exp",
+  "inclusionai/ling-3.0-flash-fin",
+  "minimax/minimax-m3",
+  "nvidia/nemotron-3-nano-30b-a3b",
+  "qwen/qwen3.5-plus",
+  "qwen/qwen3.6-27b",
+  "qwen/qwen3.6-35b-a3b",
+  "qwen/qwen3.6-plus",
+  "qwen/qwen3.8-27b",
+  "qwen/qwen3.8-flash",
+  "qwen/qwen3.8-max",
+  "tencent/hy3",
+  "zai-org/glm-5-turbo",
+  "zai-org/glm-5.3",
+  "zai-org/glm-5v-turbo",
+]);
+const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
 const Pricing = z.object({
   prompt: Price.optional(),
@@ -124,12 +145,17 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const context = model.context_size ?? resolved?.limit?.context ?? 0;
   const outputLimit = model.max_output_tokens ?? resolved?.limit?.output ?? context;
   const modelCost = cost(model, existing);
+  // Novita's GLM-5.3 description claims reasoning cannot be disabled, but
+  // its chat API returns no reasoning when thinking.type is disabled.
+  const description = model.id === "zai-org/glm-5.3" ? undefined : model.description;
   // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
-  const reasoningOptions = existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
+  const reasoningOptions = existing?.reasoning_options
+    ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }] : model.id === "deepseek/deepseek-r1" ? [] : undefined);
+  const interleaved = existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
-    description: existing?.description || model.description || describeModel({ id: model.id, name, reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? false, limit: { context, output: outputLimit }, modalities: { input, output } }),
+    description: existing?.description || description || describeModel({ id: model.id, name, reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? false, limit: { context, output: outputLimit }, modalities: { input, output } }),
     family: existing?.family,
     release_date: existing?.release_date ?? dateFromTimestamp(model.created),
     last_updated: existing?.last_updated ?? dateFromTimestamp(model.created),
@@ -146,20 +172,20 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   if (baseModel !== undefined) return factorBaseModel(baseModel, {
     ...values,
     // An empty catalog description is not a provider-specific override.
-    description: existing?.description || model.description || undefined,
+    description: existing?.description || description || undefined,
     // These are lab facts, not claims made by the Novita catalog endpoint.
     open_weights: existing?.open_weights,
     release_date: existing?.release_date,
     last_updated: existing?.last_updated,
     temperature: existing?.temperature,
     reasoning_options: reasoningOptions,
-    interleaved: existing?.interleaved,
+    interleaved,
   }, values.limit, existing?.base_model_omit);
   return {
     ...existing,
     ...values,
     reasoning_options: existing?.reasoning_options,
-    interleaved: existing?.interleaved,
+    interleaved,
     status: existing?.status,
     knowledge: existing?.knowledge,
   } as SyncedModel;
@@ -205,6 +231,10 @@ export const novitaAi = {
   },
   translateModel(model, context) {
     const translated = buildNovitaModel(model, context.authored(model.id), context.existing(model.id));
-    return translated === undefined ? undefined : { id: model.id, model: translated };
+    return translated === undefined ? undefined : {
+      id: model.id,
+      model: translated,
+      header: VERIFIED_THINKING_TOGGLE.has(model.id) ? VERIFIED_TOGGLE_HEADER : undefined,
+    };
   },
 } satisfies SyncProvider<NovitaAIModel>;
