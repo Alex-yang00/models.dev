@@ -48,9 +48,9 @@ test("maps Novita catalog metadata onto existing models", () => {
     },
   }), {
     existing: () => ({}),
-    authored: () => ({ base_model: "test/base", name: "Old", description: "Old", attachment: false, reasoning: false, tool_call: false, open_weights: true, limit: { context: 1, output: 1 }, modalities: { input: ["text"], output: ["text"] } }),
+    authored: () => ({ base_model: "deepseek/deepseek-v3.2", name: "Old", description: "Old", attachment: false, reasoning: false, tool_call: false, open_weights: true, limit: { context: 1, output: 1 }, modalities: { input: ["text"], output: ["text"] } }),
   });
-  expect(translated?.model).toMatchObject({ name: "GLM 5.3 Flash", reasoning: true, tool_call: true, structured_output: true, limit: { context: 1_048_576, output: 131_072 }, cost: { input: 0.15, output: 0.5, cache_read: 0.03 }, modalities: { input: ["text", "image"], output: ["text"] } });
+  expect(translated?.model).toMatchObject({ name: "GLM 5.3 Flash", limit: { context: 1_048_576, output: 131_072 }, cost: { input: 0.15, output: 0.5, cache_read: 0.03 }, modalities: { input: ["text", "image"] } });
 });
 
 test("rejects invalid Novita AI API responses", () => {
@@ -86,16 +86,79 @@ test("Novita AI sync preserves authored metadata for existing models", () => {
     authored: () => authored,
   });
 
-  expect(translated).toMatchObject({ id: "deepseek/deepseek-v3.2", model: authored });
+  expect(translated).toMatchObject({ id: "deepseek/deepseek-v3.2", model: {
+    base_model: authored.base_model,
+    reasoning_options: authored.reasoning_options,
+    interleaved: authored.interleaved,
+    cost: authored.cost,
+  } });
 });
 
-test("Novita AI sync creates unknown remote models from API metadata", () => {
-  const translated = novitaAi.translateModel(novitaAiModel({ id: "novita/unknown-model", context_size: 8192, max_output_tokens: 4096, pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } }), {
+test("Novita AI sync creates non-reasoning models with a known lab base and a price", () => {
+  const translated = novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", context_size: 8192, max_output_tokens: 4096, features: [], pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } }), {
     existing: () => undefined,
     authored: () => undefined,
   });
-  expect(translated?.id).toBe("novita/unknown-model");
-  expect(translated?.model).toMatchObject({ limit: { context: 8192, output: 4096 }, cost: { input: 0.1, output: 0.2 } });
+  expect(translated?.id).toBe("deepseek/deepseek-v3");
+  expect(translated?.model).toMatchObject({ base_model: "deepseek/deepseek-v3", limit: { context: 8192, output: 4096 }, cost: { input: 0.1, output: 0.2 } });
+});
+
+test("Novita AI sync skips new models with unknown lab, price, or reasoning controls", () => {
+  const context = { existing: () => undefined, authored: () => undefined };
+  const price = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
+  expect(novitaAi.translateModel(novitaAiModel({ id: "novita/unknown-model", pricing: price }), context)).toBeUndefined();
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", features: [] }), context)).toBeUndefined();
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", features: ["reasoning"], pricing: price }), context)).toBeUndefined();
+});
+
+test("Novita AI sync maps tiered context prices and cache-write", () => {
+  const pricing = (input: string, output: string, cacheWrite: string) => ({
+    prompt: { price_per_m_decimal: input },
+    completion: { price_per_m_decimal: output },
+    input_cache_write: { price_per_m_decimal: cacheWrite },
+  });
+  const result = novitaAi.translateModel(novitaAiModel({
+    id: "deepseek/deepseek-v3",
+    features: [],
+    is_tiered_billing: true,
+    tiered_billing_configs: [
+      { min_tokens: 256_000, max_tokens: 1_000_000, pricing: pricing("0.5", "3", "0.625") },
+      { min_tokens: 1, max_tokens: 256_000, pricing: pricing("0.4", "2.4", "0.5") },
+    ],
+  }), { existing: () => undefined, authored: () => undefined });
+  expect(result?.model).toMatchObject({ cost: {
+    input: 0.4, output: 2.4, cache_write: 0.5,
+    tiers: [{ tier: { type: "context", size: 256_000 }, input: 0.5, output: 3, cache_write: 0.625 }],
+  } });
+});
+
+test("Novita AI sync preserves inherited capabilities when features are absent", () => {
+  const authored = { base_model: "deepseek/deepseek-v3.2", cost: { input: 0.1, output: 0.2 } };
+  const resolved = { ...authored, reasoning: true, tool_call: true, modalities: { input: ["text" as const], output: ["text" as const] } };
+  const translated = novitaAi.translateModel(novitaAiModel(), {
+    authored: () => authored,
+    existing: () => resolved,
+  });
+  expect(translated?.model).toMatchObject({ base_model: authored.base_model });
+  expect(translated?.model).not.toHaveProperty("reasoning", false);
+  expect(translated?.model).not.toHaveProperty("tool_call", false);
+});
+
+test("Novita AI sync updates existing inline model capabilities", () => {
+  const existing = {
+    name: "Old", description: "Old", reasoning: false, tool_call: false,
+    attachment: false, open_weights: false, release_date: "2025-01-01", last_updated: "2025-01-01",
+    limit: { context: 8192, output: 4096 }, modalities: { input: ["text" as const], output: ["text" as const] },
+  };
+  const translated = novitaAi.translateModel(novitaAiModel({
+    id: "novita/custom-model",
+    display_name: "Updated", features: ["reasoning", "function-calling"],
+    input_modalities: ["text", "image"],
+  }), { authored: () => existing, existing: () => existing });
+  expect(translated?.model).toMatchObject({
+    name: "Updated", reasoning: true, tool_call: true, attachment: true,
+    modalities: { input: ["text", "image"] },
+  });
 });
 
 test("Novita AI sync removes local models absent from API response", async () => {

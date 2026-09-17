@@ -1,12 +1,17 @@
 import { z } from "zod";
-import path from "node:path";
 
 import { describeModel } from "../../describe.js";
-import { inferKimiFamily, ModelFamilyValues } from "../../family.js";
 import type { ExistingModel, SyncProvider, SyncedFullModel, SyncedModel } from "../index.js";
+import { factorBaseModel, resolveModelMetadataBaseModel } from "./openrouter.js";
 
 const API_ENDPOINT = "https://api.novita.ai/openai/v1/models";
-const MODELS_DIR = path.join(import.meta.dirname, "..", "..", "..", "..", "..", "models");
+const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
+const Pricing = z.object({
+  prompt: Price.optional(),
+  completion: Price.optional(),
+  input_cache_read: Price.optional(),
+  input_cache_write: Price.optional(),
+}).passthrough();
 
 export const NovitaAIModel = z.object({
   id: z.string().min(1),
@@ -21,11 +26,13 @@ export const NovitaAIModel = z.object({
   features: z.array(z.string()).optional(),
   input_modalities: z.array(z.string()).optional(),
   output_modalities: z.array(z.string()).optional(),
-  pricing: z.object({
-    prompt: z.object({ price_per_m_decimal: z.string().optional() }).passthrough().optional(),
-    completion: z.object({ price_per_m_decimal: z.string().optional() }).passthrough().optional(),
-    input_cache_read: z.object({ price_per_m_decimal: z.string().optional() }).passthrough().optional(),
-  }).passthrough().optional(),
+  pricing: Pricing.optional(),
+  is_tiered_billing: z.boolean().optional(),
+  tiered_billing_configs: z.array(z.object({
+    min_tokens: z.number().int().nonnegative(),
+    max_tokens: z.number().int().positive(),
+    pricing: Pricing,
+  }).passthrough()).optional(),
 }).passthrough();
 
 export const NovitaAIResponse = z.object({
@@ -58,52 +65,84 @@ function dateFromTimestamp(timestamp: number) {
   return new Date(timestamp * 1000).toISOString().slice(0, 10);
 }
 
-function inferFamily(id: string, name: string) {
-  const kimi = inferKimiFamily(id, name);
-  if (kimi !== undefined) return kimi;
-  const target = `${id} ${name}`.toLowerCase();
-  return [...ModelFamilyValues].sort((a, b) => b.length - a.length).find((family) =>
-    new RegExp(`(^|[^a-z0-9])${family.toLowerCase().replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}(?=$|[^a-z0-9])`).test(target));
+function price(pricing: z.infer<typeof Pricing> | undefined) {
+  const input = decimalPrice(pricing?.prompt?.price_per_m_decimal);
+  const output = decimalPrice(pricing?.completion?.price_per_m_decimal);
+  if (input === undefined || output === undefined) return undefined;
+  return {
+    input,
+    output,
+    cache_read: decimalPrice(pricing?.input_cache_read?.price_per_m_decimal),
+    cache_write: decimalPrice(pricing?.input_cache_write?.price_per_m_decimal),
+  };
 }
 
-function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefined): SyncedModel {
+function cost(model: NovitaAIModel, existing: ExistingModel | undefined) {
+  if (model.is_tiered_billing !== true) return price(model.pricing) ?? existing?.cost;
+  const bands = [...model.tiered_billing_configs ?? []].sort((a, b) => a.min_tokens - b.min_tokens);
+  if (bands.length === 0 || bands[0]?.min_tokens > 1 || bands.some((band, index) =>
+    band.max_tokens <= band.min_tokens || (index > 0 && band.min_tokens <= bands[index - 1]!.min_tokens)
+  )) return existing?.cost;
+  const base = price(bands[0]!.pricing);
+  if (base === undefined || bands.some((band) => price(band.pricing) === undefined)) return existing?.cost;
+  return {
+    ...base,
+    tiers: bands.slice(1).map((band) => ({
+      ...price(band.pricing)!,
+      tier: { type: "context" as const, size: band.min_tokens },
+    })),
+  };
+}
+
+function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefined, resolved: ExistingModel | undefined): SyncedModel | undefined {
+  const baseModel = existing?.base_model ?? resolveModelMetadataBaseModel(model.id);
+  // New provider entries require a lab model. Do not create fabricated inline lab facts.
+  if (existing === undefined && baseModel === undefined) return undefined;
   const name = model.display_name ?? model.title ?? existing?.name ?? model.id;
-  const input = modalities(model.input_modalities, existing?.modalities?.input) ?? ["text"];
-  const output = modalities(model.output_modalities, existing?.modalities?.output) ?? ["text"];
+  const input = modalities(model.input_modalities, resolved?.modalities?.input) ?? ["text"];
+  const output = modalities(model.output_modalities, resolved?.modalities?.output) ?? ["text"];
   const features = model.features === undefined ? undefined : new Set(model.features);
-  const reasoning = features?.has("reasoning") ?? existing?.reasoning ?? false;
-  const toolCall = features?.has("function-calling") ?? existing?.tool_call ?? false;
-  const structuredOutput = features?.has("structured-outputs") ?? existing?.structured_output ?? false;
-  const context = model.context_size ?? existing?.limit?.context ?? 0;
-  const outputLimit = model.max_output_tokens ?? existing?.limit?.output ?? context;
-  const inputCost = decimalPrice(model.pricing?.prompt?.price_per_m_decimal);
-  const outputCost = decimalPrice(model.pricing?.completion?.price_per_m_decimal);
-  const cacheRead = decimalPrice(model.pricing?.input_cache_read?.price_per_m_decimal);
-  const cost = inputCost !== undefined && outputCost !== undefined
-    ? { input: inputCost, output: outputCost, cache_read: cacheRead }
-    : existing?.cost ?? { input: 0, output: 0 };
+  const reasoning = features?.has("reasoning") ?? resolved?.reasoning ?? false;
+  const toolCall = features?.has("function-calling") ?? resolved?.tool_call ?? false;
+  const structuredOutput = features?.has("structured-outputs") ?? resolved?.structured_output ?? false;
+  const context = model.context_size ?? resolved?.limit?.context ?? 0;
+  const outputLimit = model.max_output_tokens ?? resolved?.limit?.output ?? context;
+  const modelCost = cost(model, existing);
+  // A missing price is unknown, not free. Neither can we infer API reasoning controls.
+  if (existing === undefined && (modelCost === undefined || reasoning)) return undefined;
   const values: SyncedFullModel = {
     name,
-    description: model.description ?? existing?.description ?? describeModel({ id: model.id, name, family: inferFamily(model.id, name), reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? true, limit: { context, output: outputLimit }, modalities: { input, output } }),
-    family: existing?.family ?? inferFamily(model.id, name),
+    description: model.description || existing?.description || describeModel({ id: model.id, name, reasoning, tool_call: toolCall, structured_output: structuredOutput || undefined, open_weights: existing?.open_weights ?? false, limit: { context, output: outputLimit }, modalities: { input, output } }),
+    family: existing?.family,
     release_date: existing?.release_date ?? dateFromTimestamp(model.created),
     last_updated: existing?.last_updated ?? dateFromTimestamp(model.created),
     attachment: input.some((value) => value !== "text"),
     reasoning,
     tool_call: toolCall,
     structured_output: structuredOutput,
-    temperature: existing?.temperature ?? true,
-    open_weights: existing?.open_weights ?? true,
-    cost,
+    temperature: existing?.temperature,
+    open_weights: existing?.open_weights ?? false,
+    cost: modelCost,
     limit: { context, output: outputLimit },
     modalities: { input, output },
   };
-  if (existing?.base_model === undefined) return values;
+  if (baseModel !== undefined) return factorBaseModel(baseModel, {
+    ...values,
+    // These are lab facts, not claims made by the Novita catalog endpoint.
+    open_weights: existing?.open_weights,
+    release_date: existing?.release_date,
+    last_updated: existing?.last_updated,
+    temperature: existing?.temperature,
+    reasoning_options: existing?.reasoning_options,
+    interleaved: existing?.interleaved,
+  }, values.limit, existing?.base_model_omit);
   return {
     ...existing,
     ...values,
-    base_model: existing.base_model,
-    ...(existing.base_model_omit === undefined ? {} : { base_model_omit: existing.base_model_omit }),
+    reasoning_options: existing?.reasoning_options,
+    interleaved: existing?.interleaved,
+    status: existing?.status,
+    knowledge: existing?.knowledge,
   } as SyncedModel;
 }
 
@@ -126,8 +165,12 @@ export const novitaAi = {
   // The endpoint exposes the metadata needed to author new provider models.
   skipCreates: false,
   deleteMissing: true,
+  trackMissingModels: false,
   sourceID(model) {
     return model.id;
+  },
+  skippedNotice(ids) {
+    return ids.length === 0 ? [] : [`Novita models needing lab metadata, pricing, or verified reasoning controls: ${ids.join(", ")}`];
   },
   async fetchModels() {
     const key = process.env.NOVITA_API_KEY;
@@ -138,6 +181,7 @@ export const novitaAi = {
     return NovitaAIResponse.parse(raw).data;
   },
   translateModel(model, context) {
-    return { id: model.id, model: buildNovitaModel(model, context.authored(model.id)) };
+    const translated = buildNovitaModel(model, context.authored(model.id), context.existing(model.id));
+    return translated === undefined ? undefined : { id: model.id, model: translated };
   },
 } satisfies SyncProvider<NovitaAIModel>;
