@@ -10,6 +10,19 @@ export const NovitaAIModel = z.object({
   object: z.literal("model"),
   created: z.number().int().nonnegative(),
   owned_by: z.string(),
+  title: z.string().optional(),
+  display_name: z.string().optional(),
+  description: z.string().optional(),
+  context_size: z.number().int().positive().optional(),
+  max_output_tokens: z.number().int().positive().optional(),
+  features: z.array(z.string()).optional(),
+  input_modalities: z.array(z.string()).optional(),
+  output_modalities: z.array(z.string()).optional(),
+  pricing: z.object({
+    prompt: z.object({ price_per_m_decimal: z.string().optional() }).passthrough().optional(),
+    completion: z.object({ price_per_m_decimal: z.string().optional() }).passthrough().optional(),
+    input_cache_read: z.object({ price_per_m_decimal: z.string().optional() }).passthrough().optional(),
+  }).passthrough().optional(),
 }).passthrough();
 
 export const NovitaAIResponse = z.object({
@@ -31,6 +44,19 @@ function preserveAuthoredModel(id: string, authored: ExistingModel): SyncedModel
   }
   const { id: _id, ...model } = parsed.data;
   return model;
+}
+
+function decimalPrice(value: string | undefined) {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function modalities(values: string[] | undefined, fallback: ExistingModel["modalities"] | undefined) {
+  if (values === undefined || values.length === 0) return fallback;
+  const allowed = new Set(["text", "audio", "image", "video", "pdf"]);
+  const result = values.map((value) => value.toLowerCase()).filter((value) => allowed.has(value));
+  return result.length > 0 ? [...new Set(result)] : fallback;
 }
 
 export async function fetchNovitaAIModels(key: string, fetcher: typeof fetch = fetch) {
@@ -72,6 +98,37 @@ export const novitaAi = {
   translateModel(model, context) {
     const authored = context.authored(model.id);
     if (authored === undefined) return undefined;
-    return { id: model.id, model: preserveAuthoredModel(model.id, authored) };
+    const translated = { ...preserveAuthoredModel(model.id, authored) } as Record<string, unknown>;
+    if (model.display_name ?? model.title) translated.name = model.display_name ?? model.title;
+    if (model.description) translated.description = model.description;
+    if (model.context_size !== undefined || model.max_output_tokens !== undefined) {
+      translated.limit = {
+        ...authored.limit,
+        ...(model.context_size !== undefined ? { context: model.context_size } : {}),
+        ...(model.max_output_tokens !== undefined ? { output: model.max_output_tokens } : {}),
+      };
+    }
+    const input = modalities(model.input_modalities, authored.modalities?.input);
+    const output = modalities(model.output_modalities, authored.modalities?.output);
+    if (input !== undefined && output !== undefined) translated.modalities = { input, output };
+    const features = new Set(model.features ?? []);
+    if (model.features !== undefined) {
+      translated.reasoning = features.has("reasoning");
+      translated.tool_call = features.has("function-calling");
+      translated.structured_output = features.has("structured-outputs");
+    }
+    const pricing = model.pricing;
+    const inputCost = decimalPrice(pricing?.prompt?.price_per_m_decimal);
+    const outputCost = decimalPrice(pricing?.completion?.price_per_m_decimal);
+    const cacheRead = decimalPrice(pricing?.input_cache_read?.price_per_m_decimal);
+    if (inputCost !== undefined || outputCost !== undefined || cacheRead !== undefined) {
+      translated.cost = {
+        ...authored.cost,
+        ...(inputCost !== undefined ? { input: inputCost } : {}),
+        ...(outputCost !== undefined ? { output: outputCost } : {}),
+        ...(cacheRead !== undefined ? { cache_read: cacheRead } : {}),
+      };
+    }
+    return { id: model.id, model: translated as SyncedModel };
   },
 } satisfies SyncProvider<NovitaAIModel>;

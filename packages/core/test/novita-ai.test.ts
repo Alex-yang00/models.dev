@@ -32,6 +32,27 @@ test("accepts the standard OpenAI list marker when present", () => {
   expect(NovitaAIResponse.parse({ object: "list", data: [novitaAiModel()] }).data).toHaveLength(1);
 });
 
+test("maps Novita catalog metadata onto existing models", () => {
+  const translated = novitaAi.translateModel(novitaAiModel({
+    display_name: "GLM 5.3 Flash",
+    description: "Updated description",
+    context_size: 1_048_576,
+    max_output_tokens: 131_072,
+    features: ["function-calling", "structured-outputs", "reasoning"],
+    input_modalities: ["text", "image"],
+    output_modalities: ["text"],
+    pricing: {
+      prompt: { price_per_m_decimal: "0.15" },
+      completion: { price_per_m_decimal: "0.5" },
+      input_cache_read: { price_per_m_decimal: "0.03" },
+    },
+  }), {
+    existing: () => ({}),
+    authored: () => ({ base_model: "test/base", name: "Old", description: "Old", attachment: false, reasoning: false, tool_call: false, open_weights: true, limit: { context: 1, output: 1 }, modalities: { input: ["text"], output: ["text"] } }),
+  });
+  expect(translated?.model).toMatchObject({ name: "GLM 5.3 Flash", reasoning: true, tool_call: true, structured_output: true, limit: { context: 1_048_576, output: 131_072 }, cost: { input: 0.15, output: 0.5, cache_read: 0.03 }, modalities: { input: ["text", "image"], output: ["text"] } });
+});
+
 test("rejects invalid Novita AI API responses", () => {
   expect(() => NovitaAIResponse.parse({ object: "list", data: [{ id: "bad", object: "not-model", created: 1, owned_by: "" }] }))
     .toThrow();
