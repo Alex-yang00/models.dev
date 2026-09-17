@@ -86,14 +86,16 @@ test("Novita AI sync preserves authored metadata for existing models", () => {
     authored: () => authored,
   });
 
-  expect(translated).toEqual({ id: "deepseek/deepseek-v3.2", model: authored });
+  expect(translated).toMatchObject({ id: "deepseek/deepseek-v3.2", model: authored });
 });
 
-test("Novita AI sync skips unknown remote models", () => {
-  expect(novitaAi.translateModel(novitaAiModel({ id: "novita/unknown-model" }), {
+test("Novita AI sync creates unknown remote models from API metadata", () => {
+  const translated = novitaAi.translateModel(novitaAiModel({ id: "novita/unknown-model", context_size: 8192, max_output_tokens: 4096, pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } }), {
     existing: () => undefined,
     authored: () => undefined,
-  })).toBeUndefined();
+  });
+  expect(translated?.id).toBe("novita/unknown-model");
+  expect(translated?.model).toMatchObject({ limit: { context: 8192, output: 4096 }, cost: { input: 0.1, output: 0.2 } });
 });
 
 test("Novita AI sync retains local models absent from API response", async () => {
