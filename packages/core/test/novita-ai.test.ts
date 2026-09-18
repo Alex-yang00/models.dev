@@ -204,7 +204,7 @@ test("Novita AI sync reuses a verified lab alias and fixed R1 controls", () => {
 test("Novita AI sync updates V4.1 Flash prices while retaining its verified toggle", () => {
   const authored: ExistingModel = {
     base_model: "deepseek/deepseek-v4.1-flash",
-    reasoning_options: [{ type: "toggle" }],
+    reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
     interleaved: { field: "reasoning_content" },
     cost: { input: 1, output: 2 },
   };
@@ -223,7 +223,7 @@ test("Novita AI sync updates V4.1 Flash prices while retaining its verified togg
   }), { authored: () => authored, existing: () => authored });
   expect(translated?.model).toMatchObject({
     base_model: authored.base_model,
-    reasoning_options: [{ type: "toggle" }],
+    reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
     interleaved: { field: "reasoning_content" },
     cost: { input: 0.3, output: 1.2, cache_read: 0.006 },
     limit: { context: 1_048_576, output: 393_216 },
@@ -236,7 +236,10 @@ test("Novita AI sync creates only explicitly verified new reasoners", () => {
   const pricing = { prompt: { price_per_m_decimal: "0.15" }, completion: { price_per_m_decimal: "0.5" } };
   for (const id of ["qwen/qwen3.8-flash", "minimax/minimax-m3", "zai-org/glm-5.3", "deepseek/deepseek-v4-flash-0731"]) {
     const translated = novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context);
-    expect(translated?.model).toMatchObject({ reasoning_options: [{ type: "toggle" }], interleaved: { field: "reasoning_content" } });
+    expect(translated?.model).toMatchObject({
+      reasoning_options: id.startsWith("qwen/") ? [{ type: "toggle" }, { type: "budget_tokens" }] : [{ type: "toggle" }],
+      interleaved: { field: "reasoning_content" },
+    });
     expect(translated?.header).toContain("thinking.type = enabled|disabled");
     if (id === "zai-org/glm-5.3") expect(translated?.model).not.toHaveProperty("description");
   }
@@ -262,7 +265,7 @@ test("Novita AI sync treats verified Qwen reasoning behavior per model", () => {
   const price = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
   const context = { authored: () => undefined, existing: () => undefined };
   expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-max", features: ["reasoning"], pricing: price }), context)?.model)
-    .toMatchObject({ reasoning: true, reasoning_options: [{ type: "toggle" }] });
+    .toMatchObject({ reasoning: true, reasoning_options: [{ type: "toggle" }, { type: "budget_tokens" }] });
   expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model)
     .not.toHaveProperty("reasoning_options");
   expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model)
@@ -319,7 +322,7 @@ test("Novita AI sync updates existing inline model capabilities", () => {
   });
 });
 
-test("Novita AI sync removes local models absent from API response", async () => {
+test("Novita AI sync retains local models absent from API response", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "sync-novita-ai-"));
   const modelsDir = path.join(dir, "providers", "novita-ai", "models");
   await mkdir(modelsDir, { recursive: true });
@@ -367,14 +370,14 @@ test("Novita AI sync removes local models absent from API response", async () =>
         };
       },
     });
-    expect(result.deleted).toBe(1);
-    expect(await Bun.file(path.join(modelsDir, "deepseek", "deepseek-v3.2.toml")).exists()).toBe(false);
+    expect(result.deleted).toBe(0);
+    expect(await Bun.file(path.join(modelsDir, "deepseek", "deepseek-v3.2.toml")).exists()).toBe(true);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("Novita AI sync refuses a partial response before updating any files", async () => {
+test("Novita AI sync updates visible models without deleting unseen files", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "sync-novita-guard-"));
   const modelsDir = path.join(dir, "providers", "novita-ai", "models");
   const file = path.join(modelsDir, "novita", "custom.toml");
@@ -388,8 +391,8 @@ test("Novita AI sync refuses a partial response before updating any files", asyn
     await expect(syncProvider({
       ...novitaAi, modelsDir, maxMissingFraction: 0.49,
       async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom", features: [], pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } })] }; },
-    })).rejects.toThrow("would delete 1/2 existing models");
-    expect(await Bun.file(file).text()).toBe(content);
+    })).resolves.toMatchObject({ deleted: 0 });
+    expect(await Bun.file(file).text()).not.toBe(content);
     expect(await Bun.file(other).text()).toBe(content);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -411,7 +414,7 @@ test("Novita AI sync keeps local files when translation skips an existing remote
     }, { dryRun: true, openIssues: true });
     expect(result.deleted).toBe(0);
     expect(result.notices.join(" ")).toContain("novita/custom");
-    expect(result.notices.join(" ")).toContain("Would open GitHub issue");
+  expect(result.notices.join(" ")).toContain("Novita models needing lab metadata");
     expect(await Bun.file(file).text()).toBe(content);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -424,7 +427,7 @@ test("Novita AI sync tracks remote-only IDs", () => {
   expect(novitaAi.sourceID?.(novitaAiModel())).toBe("deepseek/deepseek-v3.2");
   expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/new-model" }))).toBe("novita/new-model");
   expect(novitaAi.trackMissingModels).toBe(true);
-  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model", model_type: "chat", endpoints: ["chat/completions"] }))).toBe("novita/new-model");
+  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model", model_type: "chat", endpoints: ["chat/completions"] }))).toBeUndefined();
   expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/image", model_type: "image", endpoints: ["images/generations"] }))).toBeUndefined();
 });
 

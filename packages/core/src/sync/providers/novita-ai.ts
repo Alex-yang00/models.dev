@@ -35,10 +35,19 @@ const VERIFIED_NON_REASONING = new Set([
 // Novita accepts the thinking toggle for these routes, but no effort ladder
 // was verified; do not preserve an inherited guessed ladder from older files.
 const VERIFIED_TOGGLE_ONLY = new Set([
-  "deepseek/deepseek-v4-flash",
-  "deepseek/deepseek-v4-pro",
+  "deepseek/deepseek-v4-flash-vision-exp",
 ]);
 const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
+const VERIFIED_BUDGET_TOGGLE = new Set([
+  "qwen/qwen3.5-plus",
+  "qwen/qwen3.6-27b",
+  "qwen/qwen3.6-35b-a3b",
+  "qwen/qwen3.6-plus",
+  "qwen/qwen3.8-27b",
+  "qwen/qwen3.8-flash",
+  "qwen/qwen3.8-max",
+  "qwen/qwen3-max",
+]);
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
 const Pricing = z.object({
   prompt: Price.optional(),
@@ -153,9 +162,9 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const output = modalities(model.output_modalities, resolved?.modalities?.output) ?? ["text"];
   const features = model.features === undefined ? undefined : new Set(model.features);
   const featureValue = (feature: string, fallback: boolean | undefined) =>
-    features === undefined || features.size === 0
+    features === undefined || features.size === 0 || !features.has(feature)
       ? fallback ?? false
-      : features.has(feature) || fallback === true;
+      : true;
   const reasoning = VERIFIED_NON_REASONING.has(model.id) ? false : featureValue("reasoning", resolved?.reasoning);
   const toolCall = featureValue("function-calling", resolved?.tool_call);
   const structuredOutput = featureValue("structured-outputs", resolved?.structured_output);
@@ -169,8 +178,11 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const description = model.id === "zai-org/glm-5.3" ? undefined : model.description;
   // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
   const reasoningOptions = VERIFIED_NON_REASONING.has(model.id) ? undefined
-    : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
+    : VERIFIED_BUDGET_TOGGLE.has(model.id) ? [{ type: "toggle" as const }, { type: "budget_tokens" as const }]
+      : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
       : VERIFIED_TOGGLE_ONLY.has(model.id) ? [{ type: "toggle" as const }]
+        : model.id === "deepseek/deepseek-v4-pro" ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["high", "max"] }]
+      : ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731"].includes(model.id) ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["low", "high", "max"] }]
       : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
   const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
@@ -230,13 +242,16 @@ export const novitaAi = {
   modelsDir: "providers/novita-ai/models",
   // The endpoint exposes the metadata needed to author new provider models.
   skipCreates: false,
-  deleteMissing: true,
+  // The authenticated inventory may be account- or tier-scoped; never delete
+  // locally curated models solely because a key cannot see them.
+  deleteMissing: false,
   trackMissingModels: true,
   maxMissingFraction: 0.5,
   missingModelID(model) {
     // The endpoint also exposes image, embedding, and other non-chat rows.
     // Only chat models are candidates for a provider catalog TOML/issue.
     if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || model.context_size === 0) return undefined;
+    if (model.pricing === undefined && model.input_token_price_per_m === undefined && model.output_token_price_per_m === undefined) return undefined;
     return model.id;
   },
   sourceID(model) {
@@ -259,7 +274,7 @@ export const novitaAi = {
       id: model.id,
       model: translated,
       header: ("reasoning_options" in translated && translated.reasoning_options?.some((option) => option.type === "toggle"))
-        ? VERIFIED_TOGGLE_HEADER
+        ? `${VERIFIED_TOGGLE_HEADER}${VERIFIED_BUDGET_TOGGLE.has(model.id) ? "# Budget: thinking_budget (integer reasoning tokens)\n" : ""}`
         : undefined,
     };
   },
