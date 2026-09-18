@@ -24,9 +24,7 @@ const VERIFIED_NON_REASONING = new Set([
 ]);
 // Novita accepts the thinking toggle for these routes, but no effort ladder
 // was verified; do not preserve an inherited guessed ladder from older files.
-const VERIFIED_TOGGLE_ONLY = new Set([
-  "deepseek/deepseek-v4-flash-vision-exp",
-]);
+const VERIFIED_TOGGLE_ONLY = new Set<string>();
 const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
 const VERIFIED_BUDGET_TOGGLE = new Set([
   "qwen/qwen3.5-plus",
@@ -172,9 +170,9 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
       : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
       : VERIFIED_TOGGLE_ONLY.has(model.id) ? [{ type: "toggle" as const }]
         : model.id === "deepseek/deepseek-v4-pro" ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["high", "max"] }]
-      : ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731"].includes(model.id) ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["low", "high", "max"] }]
+      : ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-vision-exp"].includes(model.id) ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["low", "high", "max"] }]
       : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
-  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) || VERIFIED_BUDGET_TOGGLE.has(model.id) || VERIFIED_TOGGLE_ONLY.has(model.id) || model.id === "deepseek/deepseek-v4-pro" || ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731"].includes(model.id) ? { field: "reasoning_content" as const } : undefined);
+  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) || VERIFIED_BUDGET_TOGGLE.has(model.id) || VERIFIED_TOGGLE_ONLY.has(model.id) || model.id === "deepseek/deepseek-v4-pro" || ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-vision-exp"].includes(model.id) ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
@@ -236,7 +234,6 @@ export const novitaAi = {
   // locally curated models solely because a key cannot see them.
   deleteMissing: false,
   trackMissingModels: true,
-  maxMissingFraction: 0.5,
   missingModelID(model) {
     // The endpoint also exposes image, embedding, and other non-chat rows.
     // Only chat models are candidates for a provider catalog TOML/issue.
@@ -264,7 +261,7 @@ export const novitaAi = {
       id: model.id,
       model: translated,
       header: ("reasoning_options" in translated && translated.reasoning_options?.some((option) => option.type === "toggle"))
-        ? `${VERIFIED_TOGGLE_HEADER}${VERIFIED_BUDGET_TOGGLE.has(model.id) ? "# Budget: thinking_budget (integer reasoning tokens)\n" : ""}`
+        ? `${VERIFIED_TOGGLE_HEADER}${translated.reasoning_options.filter((option) => option.type === "effort").map((option) => `# Effort: reasoning_effort = ${option.values.join("|")}\n`).join("")}${translated.reasoning_options.some((option) => option.type === "budget_tokens") ? "# Budget: thinking_budget (integer reasoning tokens)\n" : ""}`
         : undefined,
     };
   },

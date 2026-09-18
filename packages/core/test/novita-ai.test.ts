@@ -258,7 +258,7 @@ test("Novita AI keeps verified DeepSeek and Qwen controls on re-sync", () => {
   expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v4-flash-0731", features: ["reasoning"], pricing }), context)?.model)
     .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] });
   expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v4-flash-vision-exp", features: ["reasoning"], pricing }), context)?.model)
-    .toMatchObject({ reasoning_options: [{ type: "toggle" }] });
+    .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] });
   for (const id of ["qwen/qwen3.6-27b", "qwen/qwen3.6-35b-a3b", "qwen/qwen3.6-plus", "qwen/qwen3.8-27b", "qwen/qwen3.8-flash", "qwen/qwen3.8-max"]) {
     expect(novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context)?.model)
       .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "budget_tokens" }] });
