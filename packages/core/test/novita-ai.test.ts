@@ -32,6 +32,10 @@ test("accepts the standard OpenAI list marker when present", () => {
   expect(NovitaAIResponse.parse({ object: "list", data: [novitaAiModel()] }).data).toHaveLength(1);
 });
 
+test("accepts Novita non-LLM catalog entries with zero context size", () => {
+  expect(NovitaAIResponse.parse({ data: [novitaAiModel({ id: "image/design", context_size: 0 })] }).data[0]?.context_size).toBe(0);
+});
+
 test("maps Novita catalog metadata onto existing models", () => {
   const translated = novitaAi.translateModel(novitaAiModel({
     display_name: "GLM 5.3 Flash",

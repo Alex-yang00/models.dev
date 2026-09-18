@@ -47,7 +47,8 @@ export const NovitaAIModel = z.object({
   title: z.string().optional(),
   display_name: z.string().optional(),
   description: z.string().optional(),
-  context_size: z.number().int().positive().optional(),
+  // Some non-LLM catalog entries use zero when no context window applies.
+  context_size: z.number().int().nonnegative().optional(),
   max_output_tokens: z.number().int().positive().optional(),
   features: z.array(z.string()).optional(),
   input_modalities: z.array(z.string()).optional(),
@@ -142,7 +143,9 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const reasoning = features?.has("reasoning") ?? resolved?.reasoning ?? false;
   const toolCall = features?.has("function-calling") ?? resolved?.tool_call ?? false;
   const structuredOutput = features?.has("structured-outputs") ?? resolved?.structured_output ?? false;
-  const context = model.context_size ?? resolved?.limit?.context ?? 0;
+  const context = model.context_size && model.context_size > 0
+    ? model.context_size
+    : resolved?.limit?.context ?? 0;
   const outputLimit = model.max_output_tokens ?? resolved?.limit?.output ?? context;
   const modelCost = cost(model, existing);
   // Novita's GLM-5.3 description claims reasoning cannot be disabled, but
