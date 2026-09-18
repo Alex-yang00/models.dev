@@ -237,7 +237,11 @@ test("Novita AI sync creates only explicitly verified new reasoners", () => {
   for (const id of ["qwen/qwen3.8-flash", "minimax/minimax-m3", "zai-org/glm-5.3", "deepseek/deepseek-v4-flash-0731"]) {
     const translated = novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context);
     expect(translated?.model).toMatchObject({
-      reasoning_options: id.startsWith("qwen/") ? [{ type: "toggle" }, { type: "budget_tokens" }] : [{ type: "toggle" }],
+      reasoning_options: id.startsWith("qwen/")
+        ? [{ type: "toggle" }, { type: "budget_tokens" }]
+        : id === "deepseek/deepseek-v4-flash-0731"
+          ? [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }]
+          : [{ type: "toggle" }],
       interleaved: { field: "reasoning_content" },
     });
     expect(translated?.header).toContain("thinking.type = enabled|disabled");
@@ -245,6 +249,19 @@ test("Novita AI sync creates only explicitly verified new reasoners", () => {
   }
   for (const id of ["zai-org/glm-5.3-flash", "deepseek/deepseek-v4-pro-0813", "qwen/qwen3.8-2.4t-a95b"]) {
     expect(novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context)).toBeUndefined();
+  }
+});
+
+test("Novita AI keeps verified DeepSeek and Qwen controls on re-sync", () => {
+  const context = { authored: () => undefined, existing: () => undefined };
+  const pricing = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v4-flash-0731", features: ["reasoning"], pricing }), context)?.model)
+    .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] });
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v4-flash-vision-exp", features: ["reasoning"], pricing }), context)?.model)
+    .toMatchObject({ reasoning_options: [{ type: "toggle" }] });
+  for (const id of ["qwen/qwen3.6-27b", "qwen/qwen3.6-35b-a3b", "qwen/qwen3.6-plus", "qwen/qwen3.8-27b", "qwen/qwen3.8-flash", "qwen/qwen3.8-max"]) {
+    expect(novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context)?.model)
+      .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "budget_tokens" }] });
   }
 });
 

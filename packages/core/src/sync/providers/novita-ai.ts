@@ -11,19 +11,9 @@ const BASE_MODEL_ALIASES: Record<string, string> = {
 // Verified per model with Novita chat/completions: disabling thinking removes
 // reasoning_content, while enabling it returns reasoning_content.
 const VERIFIED_THINKING_TOGGLE = new Set([
-  "deepseek/deepseek-v4-flash-0731",
-  "deepseek/deepseek-v4-flash-vision-exp",
   "inclusionai/ling-3.0-flash-fin",
   "minimax/minimax-m3",
   "nvidia/nemotron-3-nano-30b-a3b",
-  "qwen/qwen3.5-plus",
-  "qwen/qwen3.6-27b",
-  "qwen/qwen3.6-35b-a3b",
-  "qwen/qwen3.6-plus",
-  "qwen/qwen3.8-27b",
-  "qwen/qwen3.8-flash",
-  "qwen/qwen3.8-max",
-  "qwen/qwen3-max",
   "tencent/hy3",
   "zai-org/glm-5-turbo",
   "zai-org/glm-5.3",
@@ -184,7 +174,7 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
         : model.id === "deepseek/deepseek-v4-pro" ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["high", "max"] }]
       : ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731"].includes(model.id) ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["low", "high", "max"] }]
       : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
-  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? { field: "reasoning_content" as const } : undefined);
+  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) || VERIFIED_BUDGET_TOGGLE.has(model.id) || VERIFIED_TOGGLE_ONLY.has(model.id) || model.id === "deepseek/deepseek-v4-pro" || ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731"].includes(model.id) ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
