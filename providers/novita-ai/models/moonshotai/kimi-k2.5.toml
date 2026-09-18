@@ -1,3 +1,5 @@
+# Toggle: thinking.type = enabled|disabled
+# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
 base_model = "moonshotai/kimi-k2.5"
 description = "Kimi multimodal agent model for visual understanding, coding, and planning"
 release_date = "2026-01-27"

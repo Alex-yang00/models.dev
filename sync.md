@@ -176,6 +176,7 @@ CrossModel is implemented in `packages/core/src/sync/providers/crossmodel.ts`.
 - Existing authored descriptions and provider-specific reasoning controls remain curated: the API can truncate descriptions and does not describe each model's reasoning wire controls. New models lacking verified lab metadata, usable prices, or reasoning controls are skipped and tracked through deduped missing-model issues in GitHub Actions.
 - New reasoning models use an exact-ID list of live-tested `thinking.type = enabled|disabled` controls. The same field is ignored by some Novita routes (including GLM-5.3 Flash and DeepSeek V4 Pro 0813), so it must not be inferred for an entire lab or from a `reasoning` feature flag. Unknown effort levels are not published.
 - Missing-model issues are limited to chat-completion catalog rows with a usable context window; image, embedding, and other non-chat rows are intentionally ignored.
+- `/openai/v1/models` is treated as Novita's complete public model catalog: the endpoint is the source used by the model detail catalog and returns the served public rows, so absent local rows are removed after the shrink guard passes.
 - An empty response is rejected; a run removing more than half the existing catalog fails before any files are written. Smaller removals follow the complete remote catalog.
 
 ## OpenRouter Notes

@@ -1,3 +1,5 @@
+# Toggle: thinking.type = enabled|disabled
+# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
 base_model = "google/gemma-4-26b-a4b-it"
 name = "Gemma 4 26B A4B"
 description = "Open Gemma instruction model for efficient chat and self-hosted deployments"

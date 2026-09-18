@@ -32,6 +32,12 @@ const VERIFIED_THINKING_TOGGLE = new Set([
 const VERIFIED_NON_REASONING = new Set([
   "qwen/qwen3-next-80b-a3b-instruct",
 ]);
+// Novita accepts the thinking toggle for these routes, but no effort ladder
+// was verified; do not preserve an inherited guessed ladder from older files.
+const VERIFIED_TOGGLE_ONLY = new Set([
+  "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4-pro",
+]);
 const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
 const Pricing = z.object({
@@ -164,6 +170,7 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
   const reasoningOptions = VERIFIED_NON_REASONING.has(model.id) ? undefined
     : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
+      : VERIFIED_TOGGLE_ONLY.has(model.id) ? [{ type: "toggle" as const }]
       : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
   const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
@@ -224,6 +231,7 @@ export const novitaAi = {
   // The endpoint exposes the metadata needed to author new provider models.
   skipCreates: false,
   deleteMissing: true,
+  authoritativeHeaders: true,
   trackMissingModels: true,
   maxMissingFraction: 0.5,
   missingModelID(model) {

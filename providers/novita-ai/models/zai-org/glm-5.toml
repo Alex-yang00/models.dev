@@ -1,3 +1,5 @@
+# Toggle: thinking.type = enabled|disabled
+# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
 base_model = "zhipuai/glm-5"
 name = "GLM 5"
 description = "Flagship GLM model for hybrid reasoning, coding, and agentic engineering"
