@@ -23,10 +23,14 @@ const VERIFIED_THINKING_TOGGLE = new Set([
   "qwen/qwen3.8-27b",
   "qwen/qwen3.8-flash",
   "qwen/qwen3.8-max",
+  "qwen/qwen3-max",
   "tencent/hy3",
   "zai-org/glm-5-turbo",
   "zai-org/glm-5.3",
   "zai-org/glm-5v-turbo",
+]);
+const VERIFIED_NON_REASONING = new Set([
+  "qwen/qwen3-next-80b-a3b-instruct",
 ]);
 const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
@@ -51,6 +55,8 @@ export const NovitaAIModel = z.object({
   context_size: z.number().int().nonnegative().optional(),
   max_output_tokens: z.number().int().positive().optional(),
   features: z.array(z.string()).optional(),
+  model_type: z.string().optional(),
+  endpoints: z.array(z.string()).optional(),
   input_modalities: z.array(z.string()).optional(),
   output_modalities: z.array(z.string()).optional(),
   pricing: Pricing.optional(),
@@ -140,9 +146,13 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const input = modalities(model.input_modalities, resolved?.modalities?.input) ?? ["text"];
   const output = modalities(model.output_modalities, resolved?.modalities?.output) ?? ["text"];
   const features = model.features === undefined ? undefined : new Set(model.features);
-  const reasoning = features?.has("reasoning") ?? resolved?.reasoning ?? false;
-  const toolCall = features?.has("function-calling") ?? resolved?.tool_call ?? false;
-  const structuredOutput = features?.has("structured-outputs") ?? resolved?.structured_output ?? false;
+  const featureValue = (feature: string, fallback: boolean | undefined) =>
+    features === undefined || features.size === 0
+      ? fallback ?? false
+      : features.has(feature) || fallback === true;
+  const reasoning = VERIFIED_NON_REASONING.has(model.id) ? false : featureValue("reasoning", resolved?.reasoning);
+  const toolCall = featureValue("function-calling", resolved?.tool_call);
+  const structuredOutput = featureValue("structured-outputs", resolved?.structured_output);
   const context = model.context_size && model.context_size > 0
     ? model.context_size
     : resolved?.limit?.context ?? 0;
@@ -152,9 +162,10 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   // its chat API returns no reasoning when thinking.type is disabled.
   const description = model.id === "zai-org/glm-5.3" ? undefined : model.description;
   // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
-  const reasoningOptions = existing?.reasoning_options
-    ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }] : model.id === "deepseek/deepseek-r1" ? [] : undefined);
-  const interleaved = existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? { field: "reasoning_content" as const } : undefined);
+  const reasoningOptions = VERIFIED_NON_REASONING.has(model.id) ? undefined
+    : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
+      : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
+  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
@@ -216,6 +227,9 @@ export const novitaAi = {
   trackMissingModels: true,
   maxMissingFraction: 0.5,
   missingModelID(model) {
+    // The endpoint also exposes image, embedding, and other non-chat rows.
+    // Only chat models are candidates for a provider catalog TOML/issue.
+    if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || model.context_size === 0) return undefined;
     return model.id;
   },
   sourceID(model) {
@@ -237,7 +251,9 @@ export const novitaAi = {
     return translated === undefined ? undefined : {
       id: model.id,
       model: translated,
-      header: VERIFIED_THINKING_TOGGLE.has(model.id) ? VERIFIED_TOGGLE_HEADER : undefined,
+      header: ("reasoning_options" in translated && translated.reasoning_options?.some((option) => option.type === "toggle"))
+        ? VERIFIED_TOGGLE_HEADER
+        : undefined,
     };
   },
 } satisfies SyncProvider<NovitaAIModel>;

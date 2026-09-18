@@ -245,6 +245,30 @@ test("Novita AI sync creates only explicitly verified new reasoners", () => {
   }
 });
 
+test("Novita AI sync inherits capabilities from partial feature lists", () => {
+  const authored: ExistingModel = {
+    name: "DeepSeek", description: "DeepSeek", attachment: false, open_weights: true,
+    limit: { context: 1000, output: 100 }, modalities: { input: ["text"], output: ["text"] },
+    base_model: undefined, reasoning: true, tool_call: true,
+    reasoning_options: [{ type: "toggle" }],
+  };
+  const translated = novitaAi.translateModel(novitaAiModel({ id: "novita/custom", features: ["serverless"] }), {
+    authored: () => authored, existing: () => authored,
+  });
+  expect(translated?.model).toMatchObject({ reasoning: true, tool_call: true, reasoning_options: [{ type: "toggle" }] });
+});
+
+test("Novita AI sync treats verified Qwen reasoning behavior per model", () => {
+  const price = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
+  const context = { authored: () => undefined, existing: () => undefined };
+  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-max", features: ["reasoning"], pricing: price }), context)?.model)
+    .toMatchObject({ reasoning: true, reasoning_options: [{ type: "toggle" }] });
+  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model)
+    .not.toHaveProperty("reasoning_options");
+  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model)
+    .not.toHaveProperty("reasoning_options");
+});
+
 test("Novita AI sync maps tiered context prices and cache-write", () => {
   const pricing = (input: string, output: string, cacheWrite: string) => ({
     prompt: { price_per_m_decimal: input },
@@ -382,7 +406,7 @@ test("Novita AI sync keeps local files when translation skips an existing remote
     await Bun.write(file, content);
     const result = await syncProvider({
       ...novitaAi, modelsDir,
-      async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom" })] }; },
+      async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom", model_type: "chat", endpoints: ["chat/completions"] })] }; },
       translateModel() { return undefined; },
     }, { dryRun: true, openIssues: true });
     expect(result.deleted).toBe(0);
@@ -400,7 +424,8 @@ test("Novita AI sync tracks remote-only IDs", () => {
   expect(novitaAi.sourceID?.(novitaAiModel())).toBe("deepseek/deepseek-v3.2");
   expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/new-model" }))).toBe("novita/new-model");
   expect(novitaAi.trackMissingModels).toBe(true);
-  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model" }))).toBe("novita/new-model");
+  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model", model_type: "chat", endpoints: ["chat/completions"] }))).toBe("novita/new-model");
+  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/image", model_type: "image", endpoints: ["images/generations"] }))).toBeUndefined();
 });
 
 test("Novita AI sync requires NOVITA_API_KEY", async () => {

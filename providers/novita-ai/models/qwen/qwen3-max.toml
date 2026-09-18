@@ -1,10 +1,17 @@
+# Toggle: thinking.type = enabled|disabled
+# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
 base_model = "alibaba/qwen3-max"
 description = "Flagship Qwen model for complex reasoning, coding, and agentic workflows"
 release_date = "2025-09-24"
 last_updated = "2025-09-24"
 reasoning = true
 structured_output = true
-reasoning_options = []
+
+[interleaved]
+field = "reasoning_content"
+
+[[reasoning_options]]
+type = "toggle"
 
 [cost]
 input = 0.845
