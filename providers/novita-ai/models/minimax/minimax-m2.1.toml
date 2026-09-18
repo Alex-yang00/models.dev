@@ -1,8 +1,8 @@
 base_model = "minimax/MiniMax-M2.1"
 name = "MiniMax M2.1"
 description = "MiniMax model for chat, coding, office work, and agentic tasks"
-reasoning = false
 structured_output = true
+reasoning_options = []
 
 [interleaved]
 field = "reasoning_content"

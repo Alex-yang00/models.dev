@@ -231,7 +231,6 @@ export const novitaAi = {
   // The endpoint exposes the metadata needed to author new provider models.
   skipCreates: false,
   deleteMissing: true,
-  authoritativeHeaders: true,
   trackMissingModels: true,
   maxMissingFraction: 0.5,
   missingModelID(model) {
