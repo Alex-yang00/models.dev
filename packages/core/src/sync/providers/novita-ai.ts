@@ -30,6 +30,7 @@ const VERIFIED_THINKING_TOGGLE = new Set([
   "zai-org/glm-5v-turbo",
 ]);
 const VERIFIED_NON_REASONING = new Set([
+  "qwen/qwen3-235b-a22b-fp8",
   "qwen/qwen3-next-80b-a3b-instruct",
 ]);
 // Novita accepts the thinking toggle for these routes, but no effort ladder
@@ -237,6 +238,12 @@ export async function fetchNovitaAIModels(key: string, fetcher: (url: string, in
   return response.json();
 }
 
+function catalogCandidateID(model: NovitaAIModel) {
+  if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || model.context_size === 0) return undefined;
+  if (model.pricing === undefined && model.input_token_price_per_m === undefined && model.output_token_price_per_m === undefined) return undefined;
+  return model.id;
+}
+
 export const novitaAi = {
   id: "novita-ai",
   name: "Novita AI",
@@ -246,16 +253,13 @@ export const novitaAi = {
   // The authenticated inventory may be account- or tier-scoped; never delete
   // locally curated models solely because a key cannot see them.
   deleteMissing: false,
+  authoritativeHeadersWhenPresent: true,
   trackMissingModels: true,
   missingModelID(model) {
-    // The endpoint also exposes image, embedding, and other non-chat rows.
-    // Only chat models are candidates for a provider catalog TOML/issue.
-    if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || model.context_size === 0) return undefined;
-    if (model.pricing === undefined && model.input_token_price_per_m === undefined && model.output_token_price_per_m === undefined) return undefined;
-    return model.id;
+    return catalogCandidateID(model);
   },
   sourceID(model) {
-    return model.id;
+    return catalogCandidateID(model);
   },
   skippedNotice(ids) {
     return ids.length === 0 ? [] : [`Novita models needing lab metadata, pricing, or verified reasoning controls: ${ids.join(", ")}`];

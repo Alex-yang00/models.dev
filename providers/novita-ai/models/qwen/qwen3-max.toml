@@ -1,7 +1,6 @@
 # Toggle: thinking.type = enabled|disabled
-# Budget: thinking_budget (integer reasoning tokens)
-# Verified with Novita chat/completions on 2026-09-18: thinking.type=enabled returns reasoning_content; thinking_budget=64 returns 64 reasoning tokens.
 # Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
+# Budget: thinking_budget (integer reasoning tokens)
 base_model = "alibaba/qwen3-max"
 description = "Flagship Qwen model for complex reasoning, coding, and agentic workflows"
 release_date = "2025-09-24"

@@ -1,21 +1,20 @@
 # Toggle: thinking.type = enabled|disabled
-# Budget: thinking_budget (integer reasoning tokens)
-# Verified with Novita chat/completions on 2026-09-20: thinking_budget=64 returns 64 reasoning tokens.
 # Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
+# Budget: thinking_budget (integer reasoning tokens)
 base_model = "alibaba/qwen3.5-397b-a17b"
 name = "Qwen3.5 397B A17B"
 description = "Qwen vision-language model for visual reasoning, documents, and agent tasks"
 release_date = "2026-02-17"
 last_updated = "2026-02-17"
 
+[interleaved]
+field = "reasoning_content"
+
 [[reasoning_options]]
 type = "toggle"
 
 [[reasoning_options]]
 type = "budget_tokens"
-
-[interleaved]
-field = "reasoning_content"
 
 [cost]
 input = 0.6

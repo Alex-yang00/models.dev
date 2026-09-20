@@ -95,6 +95,8 @@ export interface SyncProvider<SourceModel> {
   preserveDescriptions?: boolean;
   /** Replace existing leading comments with translateModel.header. */
   authoritativeHeaders?: boolean;
+  /** Replace existing leading comments only when translateModel returns a header. */
+  authoritativeHeadersWhenPresent?: boolean;
   sameModel?(current: ExistingModel, desired: SyncedModel): boolean;
   missingNotice?(paths: string[]): string[];
   /**
@@ -377,7 +379,9 @@ export async function syncProvider<SourceModel>(
     const translatedHeader = translated.header === undefined
       ? undefined
       : leadingComments(translated.header);
-    const header = provider.authoritativeHeaders
+    const replaceHeader = provider.authoritativeHeaders
+      || (provider.authoritativeHeadersWhenPresent && translatedHeader !== undefined);
+    const header = replaceHeader
       ? translatedHeader ?? ""
       : (existing.get(relativePath)?.header || translatedHeader) ?? "";
     desired.set(relativePath, {
@@ -466,7 +470,8 @@ export async function syncProvider<SourceModel>(
       continue;
     }
 
-    const headerChanged = provider.authoritativeHeaders && current.header !== file.header;
+    const headerChanged = (provider.authoritativeHeaders || provider.authoritativeHeadersWhenPresent)
+      && current.header !== file.header;
     if (
       headerChanged
       || !(provider.sameModel?.(current.authored, file.model)

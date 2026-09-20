@@ -1,6 +1,6 @@
 # Toggle: thinking.type = enabled|disabled
-# Effort: reasoning_effort = low|high|max
 # Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
+# Effort: reasoning_effort = low|high|max
 base_model = "deepseek/deepseek-v4-flash-0731"
 description = "DeepSeek V4 Flash 0731 is a sparse mixture-of-experts model from DeepSeek, with 13B active parameters out of 284B total. This re-post-trained revision is suited for coding, reasoning, and agent workflows."
 

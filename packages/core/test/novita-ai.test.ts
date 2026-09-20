@@ -287,10 +287,18 @@ test("Novita AI sync treats verified Qwen reasoning behavior per model", () => {
   const context = { authored: () => undefined, existing: () => undefined };
   expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-max", features: ["reasoning"], pricing: price }), context)?.model)
     .toMatchObject({ reasoning: true, reasoning_options: [{ type: "toggle" }, { type: "budget_tokens" }] });
-  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model)
-    .not.toHaveProperty("reasoning_options");
-  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model)
-    .not.toHaveProperty("reasoning_options");
+  const authored: ExistingModel = {
+    base_model: "alibaba/qwen3-235b-a22b", name: "Qwen3 235B A22B", description: "Qwen3",
+    attachment: false, reasoning: false, tool_call: false, open_weights: true,
+    limit: { context: 40_960, output: 20_000 }, modalities: { input: ["text"], output: ["text"] },
+  };
+  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-235b-a22b-fp8", features: ["reasoning"], pricing: price }), {
+    authored: () => authored, existing: () => authored,
+  })?.model)
+    .toMatchObject({ reasoning: false });
+  const next = novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-next-80b-a3b-instruct", features: ["reasoning"], pricing: price }), context)?.model;
+  expect(next).toBeDefined();
+  expect(next).not.toHaveProperty("reasoning_options");
 });
 
 test("Novita AI sync maps tiered context prices and cache-write", () => {
@@ -429,7 +437,7 @@ test("Novita AI sync keeps local files when translation skips an existing remote
     await Bun.write(file, content);
     const result = await syncProvider({
       ...novitaAi, modelsDir,
-      async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom", model_type: "chat", endpoints: ["chat/completions"] })] }; },
+      async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom", model_type: "chat", endpoints: ["chat/completions"], pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } })] }; },
       translateModel() { return undefined; },
     }, { dryRun: true, openIssues: true });
     expect(result.deleted).toBe(0);
@@ -444,11 +452,14 @@ test("Novita AI sync keeps local files when translation skips an existing remote
 test("Novita AI sync tracks remote-only IDs", () => {
   expect(providers["novita-ai"]).toBe(novitaAi);
   expect(groups.aggregators).toContain("novita-ai");
-  expect(novitaAi.sourceID?.(novitaAiModel())).toBe("deepseek/deepseek-v3.2");
-  expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/new-model" }))).toBe("novita/new-model");
+  const candidate = { model_type: "chat", endpoints: ["chat/completions"], pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } };
+  expect(novitaAi.sourceID?.(novitaAiModel(candidate))).toBe("deepseek/deepseek-v3.2");
+  expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/new-model", ...candidate }))).toBe("novita/new-model");
+  expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/image", model_type: "image", endpoints: ["images/generations"] }))).toBeUndefined();
   expect(novitaAi.trackMissingModels).toBe(true);
   expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model", model_type: "chat", endpoints: ["chat/completions"] }))).toBeUndefined();
   expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/image", model_type: "image", endpoints: ["images/generations"] }))).toBeUndefined();
+  expect(novitaAi.authoritativeHeadersWhenPresent).toBe(true);
 });
 
 test("Novita AI sync requires NOVITA_API_KEY", async () => {

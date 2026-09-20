@@ -1,6 +1,0 @@
-base_model = "deepseek/deepseek-r1-distill-qwen-14b"
-reasoning_options = []
-
-[cost]
-input = 0.15
-output = 0.15
