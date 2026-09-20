@@ -311,6 +311,18 @@ test("Novita AI sync rejects rows outside the priced chat-completions catalog", 
   })).toBeUndefined();
 });
 
+test("Novita AI does not advertise GPT-OSS image input that the chat API ignores", () => {
+  const pricing = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
+  for (const id of ["openai/gpt-oss-20b", "openai/gpt-oss-120b"]) {
+    const translated = novitaAi.translateModel(novitaAiModel({ id, input_modalities: ["text", "image"], pricing }), {
+      authored: () => undefined, existing: () => undefined,
+    });
+    expect(translated?.model).toMatchObject({ base_model: id });
+    expect(translated?.model).not.toHaveProperty("attachment", true);
+    expect(translated?.model).not.toHaveProperty("modalities.input", ["text", "image"]);
+  }
+});
+
 test("Novita AI sync inherits capabilities from partial feature lists", () => {
   const authored: ExistingModel = {
     name: "DeepSeek", description: "DeepSeek", attachment: false, open_weights: true,

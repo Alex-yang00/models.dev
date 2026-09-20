@@ -3,8 +3,6 @@
 base_model = "zhipuai/glm-5.1"
 name = "GLM 5.1"
 description = "Flagship GLM model for hybrid reasoning, coding, and agentic engineering"
-release_date = "2026-03-27"
-last_updated = "2026-03-27"
 
 [interleaved]
 field = "reasoning_content"

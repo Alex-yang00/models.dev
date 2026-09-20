@@ -2,9 +2,7 @@
 # Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.
 # Budget: thinking_budget (integer reasoning tokens)
 base_model = "alibaba/qwen3.5-27b"
-description = "Qwen vision-language model for visual reasoning, documents, and agent tasks"
-release_date = "2026-02-26"
-last_updated = "2026-02-26"
+description = "The Qwen3.5 27B native vision-language Dense model incorporates a linear attention mechanism, delivering fast response times while balancing inference speed and performance. Its overall capabilities are comparable to those of the Qwen3.5-122B-A10B."
 
 [interleaved]
 field = "reasoning_content"

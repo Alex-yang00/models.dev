@@ -1,8 +1,6 @@
 base_model = "meta/llama-3.3-70b-instruct"
 name = "Llama 3.3 70B Instruct"
 description = "Open Llama instruction model for multilingual chat, reasoning, and coding"
-release_date = "2024-12-07"
-last_updated = "2024-12-07"
 structured_output = true
 
 [cost]

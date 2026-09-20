@@ -47,6 +47,8 @@ const VERIFIED_NON_REASONING = new Set([
   "qwen/qwen3-235b-a22b-fp8",
   "qwen/qwen3-next-80b-a3b-instruct",
 ]);
+// Novita's inventory lists image input, but both routes answer that they cannot see images.
+const VERIFIED_TEXT_ONLY = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
 const VERIFIED_ALWAYS_ON = new Set([
   "minimax/minimax-m2.1",
 ]);
@@ -190,7 +192,7 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   // New provider entries require a lab model. Do not create fabricated inline lab facts.
   if (existing === undefined && baseModel === undefined) return undefined;
   const name = model.display_name ?? model.title ?? existing?.name ?? model.id;
-  const input = modalities(model.input_modalities, resolved?.modalities?.input) ?? ["text"];
+  const input = VERIFIED_TEXT_ONLY.has(model.id) ? ["text" as const] : modalities(model.input_modalities, resolved?.modalities?.input) ?? ["text"];
   const output = modalities(model.output_modalities, resolved?.modalities?.output) ?? ["text"];
   const features = model.features === undefined ? undefined : new Set(model.features);
   const featureValue = (feature: string, fallback: boolean | undefined) =>

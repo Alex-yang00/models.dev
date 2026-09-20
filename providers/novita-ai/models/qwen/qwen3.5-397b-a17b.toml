@@ -4,8 +4,6 @@
 base_model = "alibaba/qwen3.5-397b-a17b"
 name = "Qwen3.5 397B A17B"
 description = "Qwen vision-language model for visual reasoning, documents, and agent tasks"
-release_date = "2026-02-17"
-last_updated = "2026-02-17"
 
 [interleaved]
 field = "reasoning_content"

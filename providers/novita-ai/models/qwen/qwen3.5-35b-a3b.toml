@@ -3,9 +3,7 @@
 # Budget: thinking_budget (integer reasoning tokens)
 base_model = "alibaba/qwen3.5-35b-a3b"
 name = "Qwen3.5 35B A3B"
-description = "Qwen vision-language model for visual reasoning, documents, and agent tasks"
-release_date = "2026-02-26"
-last_updated = "2026-02-26"
+description = "The Qwen3.5 Series 35B-A3B is a native vision-language model designed with a hybrid architecture that integrates linear attention mechanisms and a sparse mixture-of-experts model, achieving higher inference efficiency. Its overall performance is comparable to that of the Qwen3.5-27B."
 
 [interleaved]
 field = "reasoning_content"
