@@ -5,13 +5,16 @@ import type { ExistingModel, SyncProvider, SyncedFullModel, SyncedModel } from "
 import { factorBaseModel, resolveModelMetadataBaseModel } from "./openrouter.js";
 
 const API_ENDPOINT = "https://api.novita.ai/openai/v1/models";
+// Listed in /models, but chat/completions returned 503 SERVICE_NOT_AVAILABLE on 2026-09-20.
+// Re-enable after the route works and its reasoning controls can be verified.
+const UNAVAILABLE_ROUTES = new Set(["deepseek/deepseek-r1-0528-qwen3-8b"]);
 const BASE_MODEL_ALIASES: Record<string, string> = {
   "deepseek/deepseek_v3": "deepseek/deepseek-v3",
   "baidu/ernie-4.5-21B-a3b": "baidu/ernie-4.5-21b-a3b",
   "baidu/ernie-4.5-vl-424b-a47b": "baidu/ernie-4.5-vl-424b-a47b",
-  "deepseek/deepseek-r1-0528-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b",
   "deepseek/deepseek-r1-distill-llama-70b": "deepseek/deepseek-r1-distill-llama-70b",
   "deepseek/deepseek-r1-turbo": "deepseek/deepseek-r1",
+  "minimaxai/minimax-m1-80k": "minimax/minimax-m1-80k",
 };
 // Verified per model with Novita chat/completions: disabling thinking removes
 // reasoning_content, while enabling it returns reasoning_content.
@@ -44,12 +47,14 @@ const VERIFIED_THINKING_TOGGLE = new Set([
   "zai-org/glm-5v-turbo",
 ]);
 const VERIFIED_NON_REASONING = new Set([
+  "qwen/qwen3-omni-30b-a3b-thinking",
   "qwen/qwen3-235b-a22b-fp8",
   "qwen/qwen3-next-80b-a3b-instruct",
 ]);
 // Novita's inventory lists image input, but both routes answer that they cannot see images.
 const VERIFIED_TEXT_ONLY = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
 const VERIFIED_ALWAYS_ON = new Set([
+  "minimaxai/minimax-m1-80k",
   "minimax/minimax-m2.1",
 ]);
 // Novita accepts the thinking toggle for these routes, but no effort ladder
@@ -81,6 +86,9 @@ const VERIFIED_EFFORT_TOGGLE = new Map<string, Array<"low" | "high" | "max">>([
   ["deepseek/deepseek-v4-flash-0731", ["low", "high", "max"]],
   ["deepseek/deepseek-v4-flash-vision-exp", ["low", "high", "max"]],
   ["moonshotai/kimi-k3", ["low", "high", "max"]],
+]);
+const VERIFIED_EFFORT_ONLY = new Map<string, Array<"none" | "high" | "max">>([
+  ["zai-org/glm-5.2", ["none", "high", "max"]],
 ]);
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
 const Pricing = z.object({
@@ -212,13 +220,15 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const description = model.id === "zai-org/glm-5.3" ? undefined : model.description;
   // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
   const effort = VERIFIED_EFFORT_TOGGLE.get(model.id);
+  const effortOnly = VERIFIED_EFFORT_ONLY.get(model.id);
   const reasoningOptions = VERIFIED_NON_REASONING.has(model.id) ? undefined
     : VERIFIED_ALWAYS_ON.has(model.id) ? []
       : VERIFIED_BUDGET_ONLY.has(model.id) ? [{ type: "budget_tokens" as const }]
         : VERIFIED_BUDGET_TOGGLE.has(model.id) ? [{ type: "toggle" as const }, { type: "budget_tokens" as const }]
           : effort !== undefined ? [{ type: "toggle" as const }, { type: "effort" as const, values: effort }]
-            : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
-              : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
+            : effortOnly !== undefined ? [{ type: "effort" as const, values: effortOnly }]
+              : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
+                : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
   const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (reasoningOptions?.some((option) => option.type === "toggle") ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
@@ -272,6 +282,7 @@ export async function fetchNovitaAIModels(key: string, fetcher: (url: string, in
 }
 
 function catalogCandidateID(model: NovitaAIModel) {
+  if (UNAVAILABLE_ROUTES.has(model.id)) return undefined;
   if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || (model.context_size ?? 0) <= 0) return undefined;
   if (cost(model, undefined) === undefined) return undefined;
   return model.id;
@@ -281,7 +292,8 @@ function hasVerifiedReasoningControl(id: string) {
   return VERIFIED_THINKING_TOGGLE.has(id)
     || VERIFIED_BUDGET_TOGGLE.has(id)
     || VERIFIED_BUDGET_ONLY.has(id)
-    || VERIFIED_EFFORT_TOGGLE.has(id);
+    || VERIFIED_EFFORT_TOGGLE.has(id)
+    || VERIFIED_EFFORT_ONLY.has(id);
 }
 
 function reasoningHeader(id: string, model: SyncedModel) {
@@ -296,7 +308,10 @@ function reasoningHeader(id: string, model: SyncedModel) {
   const maxEvidence = id === "qwen/qwen3-max"
     ? "# Verified on Novita 2026-09-18: thinking_budget=64 produced 64 reasoning tokens; prices and context tiers come from GET /openai/v1/models.\n"
     : "";
-  return `${toggle}${effort}${budget}${maxEvidence}` || undefined;
+  const effortEvidence = id === "zai-org/glm-5.2"
+    ? "# Verified on Novita 2026-09-20: none omits reasoning_content; high|max return it.\n"
+    : "";
+  return `${toggle}${effort}${budget}${maxEvidence}${effortEvidence}` || undefined;
 }
 
 export const novitaAi = {

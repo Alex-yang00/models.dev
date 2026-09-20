@@ -1,7 +1,7 @@
-# Novita chat/completions 2026-09-20: thinking.type=enabled returns 400; thinking_budget=64 returns no reasoning tokens.
+# Novita chat/completions 2026-09-20: plain and thinking.type=disabled requests return zero reasoning tokens; enabled returns 400.
 base_model = "alibaba/qwen3-omni-30b-a3b-thinking"
 description = "The Qwen-Omni model accepts combined inputs of text and a single additional modality (image, audio, or video) to generate responses in text or speech. It offers a variety of human-like voices, supports speech output in multiple languages and dialects, and is suitable for applications such as text creation, visual recognition, and voice assistants"
-reasoning_options = []
+reasoning = false
 
 [cost]
 input = 0.25

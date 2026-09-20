@@ -290,6 +290,16 @@ test("Novita AI reconstructs verified reasoning controls without an authored pro
     .toMatchObject({ reasoning_options: [{ type: "budget_tokens" }] });
   expect(novitaAi.translateModel(novitaAiModel({ id: "minimax/minimax-m2.1", features: ["reasoning"], pricing }), context)?.model)
     .toMatchObject({ reasoning_options: [] });
+  expect(novitaAi.translateModel(novitaAiModel({ id: "minimaxai/minimax-m1-80k", features: ["reasoning"], pricing }), context)?.model)
+    .toMatchObject({ reasoning_options: [] });
+  const omni = novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-omni-30b-a3b-thinking", features: ["reasoning"], pricing }), context);
+  expect(omni?.model).toMatchObject({ reasoning: false });
+  expect(omni?.model).not.toHaveProperty("reasoning_options");
+  const glm = novitaAi.translateModel(novitaAiModel({ id: "zai-org/glm-5.2", features: ["reasoning"], pricing }), context);
+  expect(glm?.model).toMatchObject({ reasoning_options: [{ type: "effort", values: ["none", "high", "max"] }] });
+  expect(glm?.header).toContain("reasoning_effort = none|high|max");
+  expect(glm?.header).not.toContain("# Toggle:");
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-r1-0528-qwen3-8b", features: ["reasoning"], pricing }), context)).toBeUndefined();
   for (const id of ["deepseek/deepseek-r1-turbo", "baidu/ernie-4.5-vl-424b-a47b"]) {
     const translated = novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context);
     expect(translated?.model).toMatchObject({ reasoning_options: [{ type: "toggle" }], interleaved: { field: "reasoning_content" } });
