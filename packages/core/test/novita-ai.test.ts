@@ -259,9 +259,13 @@ test("Novita AI keeps verified DeepSeek and Qwen controls on re-sync", () => {
     .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] });
   expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v4-flash-vision-exp", features: ["reasoning"], pricing }), context)?.model)
     .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] });
-  for (const id of ["qwen/qwen3.6-27b", "qwen/qwen3.6-35b-a3b", "qwen/qwen3.6-plus", "qwen/qwen3.8-27b", "qwen/qwen3.8-flash", "qwen/qwen3.8-max"]) {
-    expect(novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context)?.model)
-      .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "budget_tokens" }] });
+  for (const id of ["qwen/qwen3.5-27b", "qwen/qwen3.5-35b-a3b", "qwen/qwen3.5-122b-a10b", "qwen/qwen3.5-397b-a17b", "qwen/qwen3.6-27b", "qwen/qwen3.6-35b-a3b", "qwen/qwen3.6-plus", "qwen/qwen3.7-max", "qwen/qwen3.8-27b", "qwen/qwen3.8-flash", "qwen/qwen3.8-max"]) {
+    const translated = novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context);
+    expect(translated?.model).toMatchObject({
+      reasoning_options: [{ type: "toggle" }, { type: "budget_tokens" }],
+      interleaved: { field: "reasoning_content" },
+    });
+    expect(translated?.header).toContain("thinking_budget");
   }
 });
 
@@ -379,7 +383,6 @@ test("Novita AI sync retains local models absent from API response", async () =>
     const result = await syncProvider({
       ...novitaAi,
       modelsDir,
-      maxMissingFraction: 1,
       async fetchModels() {
         return {
           object: "list",
@@ -406,7 +409,7 @@ test("Novita AI sync updates visible models without deleting unseen files", asyn
     await Bun.write(file, content);
     await Bun.write(other, content);
     await expect(syncProvider({
-      ...novitaAi, modelsDir, maxMissingFraction: 0.49,
+      ...novitaAi, modelsDir,
       async fetchModels() { return { data: [novitaAiModel({ id: "novita/custom", features: [], pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } } })] }; },
     })).resolves.toMatchObject({ deleted: 0 });
     expect(await Bun.file(file).text()).not.toBe(content);

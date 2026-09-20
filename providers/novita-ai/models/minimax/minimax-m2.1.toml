@@ -1,3 +1,4 @@
+# Verified with Novita chat/completions on 2026-09-20: reasoning_content is returned with thinking.type enabled or disabled; no caller control is exposed.
 base_model = "minimax/MiniMax-M2.1"
 name = "MiniMax M2.1"
 description = "MiniMax model for chat, coding, office work, and agentic tasks"

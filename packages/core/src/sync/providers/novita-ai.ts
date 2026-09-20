@@ -11,10 +11,20 @@ const BASE_MODEL_ALIASES: Record<string, string> = {
 // Verified per model with Novita chat/completions: disabling thinking removes
 // reasoning_content, while enabling it returns reasoning_content.
 const VERIFIED_THINKING_TOGGLE = new Set([
+  "deepseek/deepseek-v3.1",
+  "deepseek/deepseek-v3.1-terminus",
+  "deepseek/deepseek-v3.2-exp",
+  "google/gemma-4-26b-a4b-it",
+  "google/gemma-4-31b-it",
   "inclusionai/ling-3.0-flash-fin",
   "minimax/minimax-m3",
+  "moonshotai/kimi-k2.7-code",
   "nvidia/nemotron-3-nano-30b-a3b",
   "tencent/hy3",
+  "zai-org/glm-4.5-air",
+  "zai-org/glm-4.5v",
+  "zai-org/glm-4.6v",
+  "zai-org/glm-4.7-flash",
   "zai-org/glm-5-turbo",
   "zai-org/glm-5.3",
   "zai-org/glm-5v-turbo",
@@ -24,13 +34,17 @@ const VERIFIED_NON_REASONING = new Set([
 ]);
 // Novita accepts the thinking toggle for these routes, but no effort ladder
 // was verified; do not preserve an inherited guessed ladder from older files.
-const VERIFIED_TOGGLE_ONLY = new Set<string>();
 const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
 const VERIFIED_BUDGET_TOGGLE = new Set([
+  "qwen/qwen3.5-27b",
+  "qwen/qwen3.5-35b-a3b",
+  "qwen/qwen3.5-122b-a10b",
+  "qwen/qwen3.5-397b-a17b",
   "qwen/qwen3.5-plus",
   "qwen/qwen3.6-27b",
   "qwen/qwen3.6-35b-a3b",
   "qwen/qwen3.6-plus",
+  "qwen/qwen3.7-max",
   "qwen/qwen3.8-27b",
   "qwen/qwen3.8-flash",
   "qwen/qwen3.8-max",
@@ -168,11 +182,10 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   const reasoningOptions = VERIFIED_NON_REASONING.has(model.id) ? undefined
     : VERIFIED_BUDGET_TOGGLE.has(model.id) ? [{ type: "toggle" as const }, { type: "budget_tokens" as const }]
       : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
-      : VERIFIED_TOGGLE_ONLY.has(model.id) ? [{ type: "toggle" as const }]
         : model.id === "deepseek/deepseek-v4-pro" ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["high", "max"] }]
       : ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-vision-exp"].includes(model.id) ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["low", "high", "max"] }]
       : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
-  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (VERIFIED_THINKING_TOGGLE.has(model.id) || VERIFIED_BUDGET_TOGGLE.has(model.id) || VERIFIED_TOGGLE_ONLY.has(model.id) || model.id === "deepseek/deepseek-v4-pro" || ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-vision-exp"].includes(model.id) ? { field: "reasoning_content" as const } : undefined);
+  const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (reasoningOptions?.some((option) => option.type === "toggle") ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
     name,
