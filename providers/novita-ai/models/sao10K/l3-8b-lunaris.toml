@@ -1,4 +1,4 @@
-name = "Sao10k L3 8B Lunaris	"
+name = "Sao10k L3 8B Lunaris"
 description = "Open-weight instruction model for adaptable chat and self-hosted production workloads"
 release_date = "2024-11-28"
 last_updated = "2024-11-28"

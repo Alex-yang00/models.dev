@@ -1,16 +1,13 @@
-name = "XiaomiMiMo/MiMo-V2-Flash"
-description = "MiMo flash model for fast multimodal assistance and agent workflows"
-family = "mimo"
-release_date = "2025-12-19"
-last_updated = "2025-12-19"
-attachment = false
-reasoning = true
-reasoning_options = []
-temperature = true
-knowledge = "2024-12"
-tool_call = true
+# Toggle: thinking.type = enabled|disabled
+# Route is no longer returned by Novita; control follows the first-party MiMo V2 Flash baseline.
+base_model = "xiaomi/mimo-v2-flash"
 structured_output = true
-open_weights = true
+
+[[reasoning_options]]
+type = "toggle"
+
+[interleaved]
+field = "reasoning_content"
 
 [cost]
 input = 0.1
@@ -18,9 +15,4 @@ output = 0.3
 cache_read = 0.30
 
 [limit]
-context = 262_144
 output = 32_000
-
-[modalities]
-input = ["text"]
-output = ["text"]
