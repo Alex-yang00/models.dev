@@ -7,10 +7,17 @@ import { factorBaseModel, resolveModelMetadataBaseModel } from "./openrouter.js"
 const API_ENDPOINT = "https://api.novita.ai/openai/v1/models";
 const BASE_MODEL_ALIASES: Record<string, string> = {
   "deepseek/deepseek_v3": "deepseek/deepseek-v3",
+  "baidu/ernie-4.5-21B-a3b": "baidu/ernie-4.5-21b-a3b",
+  "baidu/ernie-4.5-vl-424b-a47b": "baidu/ernie-4.5-vl-424b-a47b",
+  "deepseek/deepseek-r1-0528-qwen3-8b": "deepseek/deepseek-r1-0528-qwen3-8b",
+  "deepseek/deepseek-r1-distill-llama-70b": "deepseek/deepseek-r1-distill-llama-70b",
+  "deepseek/deepseek-r1-turbo": "deepseek/deepseek-r1",
 };
 // Verified per model with Novita chat/completions: disabling thinking removes
 // reasoning_content, while enabling it returns reasoning_content.
 const VERIFIED_THINKING_TOGGLE = new Set([
+  "baidu/ernie-4.5-vl-424b-a47b",
+  "deepseek/deepseek-r1-turbo",
   "deepseek/deepseek-v3.1",
   "deepseek/deepseek-v3.1-terminus",
   "deepseek/deepseek-v3.2-exp",
@@ -46,6 +53,7 @@ const VERIFIED_ALWAYS_ON = new Set([
 // Novita accepts the thinking toggle for these routes, but no effort ladder
 // was verified; do not preserve an inherited guessed ladder from older files.
 const VERIFIED_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-17: disabling removes reasoning_content.\n";
+const VERIFIED_RECENT_TOGGLE_HEADER = "# Toggle: thinking.type = enabled|disabled\n# Verified with Novita chat/completions on 2026-09-20: enabled returns reasoning_content; disabled does not.\n";
 const VERIFIED_BUDGET_TOGGLE = new Set([
   "qwen/qwen3.5-27b",
   "qwen/qwen3.5-35b-a3b",
@@ -274,6 +282,21 @@ function hasVerifiedReasoningControl(id: string) {
     || VERIFIED_EFFORT_TOGGLE.has(id);
 }
 
+function reasoningHeader(id: string, model: SyncedModel) {
+  if (!hasVerifiedReasoningControl(id) || !("reasoning_options" in model) || model.reasoning_options === undefined) return undefined;
+  const options = model.reasoning_options;
+  const toggle = options.some((option) => option.type === "toggle")
+    ? (["baidu/ernie-4.5-vl-424b-a47b", "deepseek/deepseek-r1-turbo"].includes(id) ? VERIFIED_RECENT_TOGGLE_HEADER : VERIFIED_TOGGLE_HEADER)
+    : "";
+  const effort = options.filter((option) => option.type === "effort")
+    .map((option) => `# Effort: reasoning_effort = ${option.values.join("|")}\n`).join("");
+  const budget = options.some((option) => option.type === "budget_tokens") ? "# Budget: thinking_budget (integer reasoning tokens)\n" : "";
+  const maxEvidence = id === "qwen/qwen3-max"
+    ? "# Verified on Novita 2026-09-18: thinking_budget=64 produced 64 reasoning tokens; prices and context tiers come from GET /openai/v1/models.\n"
+    : "";
+  return `${toggle}${effort}${budget}${maxEvidence}` || undefined;
+}
+
 export const novitaAi = {
   id: "novita-ai",
   name: "Novita AI",
@@ -308,9 +331,7 @@ export const novitaAi = {
     return translated === undefined ? undefined : {
       id: model.id,
       model: translated,
-      header: hasVerifiedReasoningControl(model.id) && "reasoning_options" in translated && translated.reasoning_options !== undefined
-        ? `${translated.reasoning_options.some((option) => option.type === "toggle") ? VERIFIED_TOGGLE_HEADER : ""}${translated.reasoning_options.filter((option) => option.type === "effort").map((option) => `# Effort: reasoning_effort = ${option.values.join("|")}\n`).join("")}${translated.reasoning_options.some((option) => option.type === "budget_tokens") ? "# Budget: thinking_budget (integer reasoning tokens)\n" : ""}` || undefined
-        : undefined,
+      header: reasoningHeader(model.id, translated),
     };
   },
 } satisfies SyncProvider<NovitaAIModel>;

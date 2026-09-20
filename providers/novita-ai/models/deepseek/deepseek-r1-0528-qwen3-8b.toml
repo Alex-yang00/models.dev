@@ -1,23 +1,9 @@
+# Novita returned SERVICE_NOT_AVAILABLE on 2026-09-20; retain the curated route until its control surface can be retested.
+base_model = "deepseek/deepseek-r1-0528-qwen3-8b"
 name = "DeepSeek R1 Distill Qwen3 8B 0528"
-description = "DeepSeek reasoning model for multi-step analysis, math, coding, and tools"
-release_date = "2025-05-29"
-last_updated = "2025-05-29"
-attachment = false
-reasoning = true
-temperature = true
-tool_call = false
-structured_output = false
-open_weights = true
+description = "DeepSeek-R1-0528-Qwen3-8B is a high-performance reasoning model based on the Qwen3 8B Base model, enhanced through the integration of DeepSeek-R1-0528's Chain-of-Thought (CoT) optimization. In the AIME 2024 evaluation, this open-source model achieved state-of-the-art (SOTA) performance, delivering a 10% improvement over the original Qwen3 8B while matching the reasoning capabilities of the much larger 235-billion-parameter Qwen3-235B-thinking. "
 reasoning_options = []
 
 [cost]
 input = 0.06
 output = 0.09
-
-[limit]
-context = 128_000
-output = 32_000
-
-[modalities]
-input = ["text"]
-output = ["text"]

@@ -290,6 +290,13 @@ test("Novita AI reconstructs verified reasoning controls without an authored pro
     .toMatchObject({ reasoning_options: [{ type: "budget_tokens" }] });
   expect(novitaAi.translateModel(novitaAiModel({ id: "minimax/minimax-m2.1", features: ["reasoning"], pricing }), context)?.model)
     .toMatchObject({ reasoning_options: [] });
+  for (const id of ["deepseek/deepseek-r1-turbo", "baidu/ernie-4.5-vl-424b-a47b"]) {
+    const translated = novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context);
+    expect(translated?.model).toMatchObject({ reasoning_options: [{ type: "toggle" }], interleaved: { field: "reasoning_content" } });
+    expect(translated?.header).toContain("2026-09-20");
+  }
+  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-max", features: ["reasoning"], pricing }), context)?.header)
+    .toContain("prices and context tiers come from GET /openai/v1/models");
 });
 
 test("Novita AI sync rejects rows outside the priced chat-completions catalog", () => {
