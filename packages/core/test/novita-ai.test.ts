@@ -12,6 +12,9 @@ function novitaAiModel(overrides: Partial<NovitaAIModel> = {}): NovitaAIModel {
     object: "model",
     created: 1_765_440_000,
     owned_by: "novita",
+    model_type: "chat",
+    endpoints: ["chat/completions"],
+    context_size: 131_072,
     ...overrides,
   };
 }
@@ -128,7 +131,9 @@ test("Novita AI sync preserves authored metadata for existing models", () => {
     modalities: { input: ["text"], output: ["text"] },
   };
 
-  const translated = novitaAi.translateModel(novitaAiModel(), {
+  const translated = novitaAi.translateModel(novitaAiModel({
+    pricing: { prompt: { price_per_m_decimal: "0.269" }, completion: { price_per_m_decimal: "0.4" } },
+  }), {
     existing: () => authored,
     authored: () => authored,
   });
@@ -154,7 +159,7 @@ test("Novita AI sync skips new models with unknown lab, price, or reasoning cont
   const context = { existing: () => undefined, authored: () => undefined };
   const price = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
   expect(novitaAi.translateModel(novitaAiModel({ id: "novita/unknown-model", pricing: price }), context)).toBeUndefined();
-  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", features: [] }), context)).toBeUndefined();
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", features: [], pricing: undefined }), context)).toBeUndefined();
   expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", features: ["reasoning"], pricing: price }), context)).toBeUndefined();
 });
 
@@ -269,6 +274,36 @@ test("Novita AI keeps verified DeepSeek and Qwen controls on re-sync", () => {
   }
 });
 
+test("Novita AI reconstructs verified reasoning controls without an authored provider file", () => {
+  const context = { authored: () => undefined, existing: () => undefined };
+  const pricing = { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } };
+  for (const id of [
+    "deepseek/deepseek-v3.2", "moonshotai/kimi-k2.5", "moonshotai/kimi-k2.6",
+    "zai-org/glm-4.6", "zai-org/glm-4.7", "zai-org/glm-5", "zai-org/glm-5.1",
+  ]) {
+    expect(novitaAi.translateModel(novitaAiModel({ id, features: ["reasoning"], pricing }), context)?.model)
+      .toMatchObject({ reasoning_options: [{ type: "toggle" }] });
+  }
+  expect(novitaAi.translateModel(novitaAiModel({ id: "moonshotai/kimi-k3", features: ["reasoning"], pricing }), context)?.model)
+    .toMatchObject({ reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] });
+  expect(novitaAi.translateModel(novitaAiModel({ id: "qwen/qwen3-235b-a22b-thinking-2507", features: ["reasoning"], pricing }), context)?.model)
+    .toMatchObject({ reasoning_options: [{ type: "budget_tokens" }] });
+  expect(novitaAi.translateModel(novitaAiModel({ id: "minimax/minimax-m2.1", features: ["reasoning"], pricing }), context)?.model)
+    .toMatchObject({ reasoning_options: [] });
+});
+
+test("Novita AI sync rejects rows outside the priced chat-completions catalog", () => {
+  const context = { authored: () => undefined, existing: () => undefined };
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", model_type: "image" }), context)).toBeUndefined();
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", endpoints: ["embeddings"] }), context)).toBeUndefined();
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", context_size: 0 }), context)).toBeUndefined();
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", pricing: undefined }), context)).toBeUndefined();
+  const existing = { base_model: "deepseek/deepseek-v3", cost: { input: 0.1, output: 0.2 } };
+  expect(novitaAi.translateModel(novitaAiModel({ id: "deepseek/deepseek-v3", pricing: {} }), {
+    authored: () => existing, existing: () => existing,
+  })).toBeUndefined();
+});
+
 test("Novita AI sync inherits capabilities from partial feature lists", () => {
   const authored: ExistingModel = {
     name: "DeepSeek", description: "DeepSeek", attachment: false, open_weights: true,
@@ -276,7 +311,10 @@ test("Novita AI sync inherits capabilities from partial feature lists", () => {
     base_model: undefined, reasoning: true, tool_call: true,
     reasoning_options: [{ type: "toggle" }],
   };
-  const translated = novitaAi.translateModel(novitaAiModel({ id: "novita/custom", features: ["serverless"] }), {
+  const translated = novitaAi.translateModel(novitaAiModel({
+    id: "novita/custom", features: ["serverless"],
+    pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } },
+  }), {
     authored: () => authored, existing: () => authored,
   });
   expect(translated?.model).toMatchObject({ reasoning: true, tool_call: true, reasoning_options: [{ type: "toggle" }] });
@@ -325,7 +363,9 @@ test("Novita AI sync maps tiered context prices and cache-write", () => {
 test("Novita AI sync preserves inherited capabilities when features are absent", () => {
   const authored = { base_model: "deepseek/deepseek-v3.2", cost: { input: 0.1, output: 0.2 } };
   const resolved = { ...authored, reasoning: true, tool_call: true, modalities: { input: ["text" as const], output: ["text" as const] } };
-  const translated = novitaAi.translateModel(novitaAiModel(), {
+  const translated = novitaAi.translateModel(novitaAiModel({
+    pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } },
+  }), {
     authored: () => authored,
     existing: () => resolved,
   });
@@ -344,6 +384,7 @@ test("Novita AI sync updates existing inline model capabilities", () => {
     id: "novita/custom-model",
     display_name: "Updated", features: ["reasoning", "function-calling"],
     input_modalities: ["text", "image"],
+    pricing: { prompt: { price_per_m_decimal: "0.1" }, completion: { price_per_m_decimal: "0.2" } },
   }), { authored: () => existing, existing: () => existing });
   expect(translated?.model).toMatchObject({
     name: "Updated", reasoning: true, tool_call: true, attachment: true,
@@ -457,7 +498,7 @@ test("Novita AI sync tracks remote-only IDs", () => {
   expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/new-model", ...candidate }))).toBe("novita/new-model");
   expect(novitaAi.sourceID?.(novitaAiModel({ id: "novita/image", model_type: "image", endpoints: ["images/generations"] }))).toBeUndefined();
   expect(novitaAi.trackMissingModels).toBe(true);
-  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model", model_type: "chat", endpoints: ["chat/completions"] }))).toBeUndefined();
+  expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/new-model", model_type: "chat", endpoints: ["chat/completions"], pricing: undefined }))).toBeUndefined();
   expect(novitaAi.missingModelID?.(novitaAiModel({ id: "novita/image", model_type: "image", endpoints: ["images/generations"] }))).toBeUndefined();
   expect(novitaAi.authoritativeHeadersWhenPresent).toBe(true);
 });

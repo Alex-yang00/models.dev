@@ -14,24 +14,34 @@ const VERIFIED_THINKING_TOGGLE = new Set([
   "deepseek/deepseek-v3.1",
   "deepseek/deepseek-v3.1-terminus",
   "deepseek/deepseek-v3.2-exp",
+  "deepseek/deepseek-v3.2",
   "google/gemma-4-26b-a4b-it",
   "google/gemma-4-31b-it",
   "inclusionai/ling-3.0-flash-fin",
   "minimax/minimax-m3",
+  "moonshotai/kimi-k2.5",
+  "moonshotai/kimi-k2.6",
   "moonshotai/kimi-k2.7-code",
   "nvidia/nemotron-3-nano-30b-a3b",
   "tencent/hy3",
   "zai-org/glm-4.5-air",
   "zai-org/glm-4.5v",
+  "zai-org/glm-4.6",
   "zai-org/glm-4.6v",
   "zai-org/glm-4.7-flash",
+  "zai-org/glm-4.7",
   "zai-org/glm-5-turbo",
+  "zai-org/glm-5",
+  "zai-org/glm-5.1",
   "zai-org/glm-5.3",
   "zai-org/glm-5v-turbo",
 ]);
 const VERIFIED_NON_REASONING = new Set([
   "qwen/qwen3-235b-a22b-fp8",
   "qwen/qwen3-next-80b-a3b-instruct",
+]);
+const VERIFIED_ALWAYS_ON = new Set([
+  "minimax/minimax-m2.1",
 ]);
 // Novita accepts the thinking toggle for these routes, but no effort ladder
 // was verified; do not preserve an inherited guessed ladder from older files.
@@ -50,6 +60,17 @@ const VERIFIED_BUDGET_TOGGLE = new Set([
   "qwen/qwen3.8-flash",
   "qwen/qwen3.8-max",
   "qwen/qwen3-max",
+]);
+const VERIFIED_BUDGET_ONLY = new Set([
+  "qwen/qwen3-235b-a22b-thinking-2507",
+]);
+const VERIFIED_EFFORT_TOGGLE = new Map<string, Array<"low" | "high" | "max">>([
+  ["deepseek/deepseek-v4-pro", ["high", "max"]],
+  ["deepseek/deepseek-v4.1-flash", ["low", "high", "max"]],
+  ["deepseek/deepseek-v4-flash", ["low", "high", "max"]],
+  ["deepseek/deepseek-v4-flash-0731", ["low", "high", "max"]],
+  ["deepseek/deepseek-v4-flash-vision-exp", ["low", "high", "max"]],
+  ["moonshotai/kimi-k3", ["low", "high", "max"]],
 ]);
 const Price = z.object({ price_per_m_decimal: z.string().optional() }).passthrough();
 const Pricing = z.object({
@@ -180,12 +201,14 @@ function buildNovitaModel(model: NovitaAIModel, existing: ExistingModel | undefi
   // its chat API returns no reasoning when thinking.type is disabled.
   const description = model.id === "zai-org/glm-5.3" ? undefined : model.description;
   // DeepSeek R1 is fixed-reasoning on Novita, as with its already curated R1 variants.
+  const effort = VERIFIED_EFFORT_TOGGLE.get(model.id);
   const reasoningOptions = VERIFIED_NON_REASONING.has(model.id) ? undefined
-    : VERIFIED_BUDGET_TOGGLE.has(model.id) ? [{ type: "toggle" as const }, { type: "budget_tokens" as const }]
-      : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
-        : model.id === "deepseek/deepseek-v4-pro" ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["high", "max"] }]
-      : ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731", "deepseek/deepseek-v4-flash-vision-exp"].includes(model.id) ? [{ type: "toggle" as const }, { type: "effort" as const, values: ["low", "high", "max"] }]
-      : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
+    : VERIFIED_ALWAYS_ON.has(model.id) ? []
+      : VERIFIED_BUDGET_ONLY.has(model.id) ? [{ type: "budget_tokens" as const }]
+        : VERIFIED_BUDGET_TOGGLE.has(model.id) ? [{ type: "toggle" as const }, { type: "budget_tokens" as const }]
+          : effort !== undefined ? [{ type: "toggle" as const }, { type: "effort" as const, values: effort }]
+            : VERIFIED_THINKING_TOGGLE.has(model.id) ? [{ type: "toggle" as const }]
+              : existing?.reasoning_options ?? (model.id === "deepseek/deepseek-r1" ? [] : undefined);
   const interleaved = VERIFIED_NON_REASONING.has(model.id) ? undefined : existing?.interleaved ?? (reasoningOptions?.some((option) => option.type === "toggle") ? { field: "reasoning_content" as const } : undefined);
   if (existing === undefined && (modelCost === undefined || (reasoning && reasoningOptions === undefined))) return undefined;
   const values: SyncedFullModel = {
@@ -239,9 +262,16 @@ export async function fetchNovitaAIModels(key: string, fetcher: (url: string, in
 }
 
 function catalogCandidateID(model: NovitaAIModel) {
-  if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || model.context_size === 0) return undefined;
-  if (model.pricing === undefined && model.input_token_price_per_m === undefined && model.output_token_price_per_m === undefined) return undefined;
+  if (model.model_type !== "chat" || !model.endpoints?.includes("chat/completions") || (model.context_size ?? 0) <= 0) return undefined;
+  if (cost(model, undefined) === undefined) return undefined;
   return model.id;
+}
+
+function hasVerifiedReasoningControl(id: string) {
+  return VERIFIED_THINKING_TOGGLE.has(id)
+    || VERIFIED_BUDGET_TOGGLE.has(id)
+    || VERIFIED_BUDGET_ONLY.has(id)
+    || VERIFIED_EFFORT_TOGGLE.has(id);
 }
 
 export const novitaAi = {
@@ -273,12 +303,13 @@ export const novitaAi = {
     return NovitaAIResponse.parse(raw).data;
   },
   translateModel(model, context) {
+    if (catalogCandidateID(model) === undefined) return undefined;
     const translated = buildNovitaModel(model, context.authored(model.id), context.existing(model.id));
     return translated === undefined ? undefined : {
       id: model.id,
       model: translated,
-      header: ("reasoning_options" in translated && translated.reasoning_options?.some((option) => option.type === "toggle"))
-        ? `${VERIFIED_TOGGLE_HEADER}${translated.reasoning_options.filter((option) => option.type === "effort").map((option) => `# Effort: reasoning_effort = ${option.values.join("|")}\n`).join("")}${translated.reasoning_options.some((option) => option.type === "budget_tokens") ? "# Budget: thinking_budget (integer reasoning tokens)\n" : ""}`
+      header: hasVerifiedReasoningControl(model.id) && "reasoning_options" in translated && translated.reasoning_options !== undefined
+        ? `${translated.reasoning_options.some((option) => option.type === "toggle") ? VERIFIED_TOGGLE_HEADER : ""}${translated.reasoning_options.filter((option) => option.type === "effort").map((option) => `# Effort: reasoning_effort = ${option.values.join("|")}\n`).join("")}${translated.reasoning_options.some((option) => option.type === "budget_tokens") ? "# Budget: thinking_budget (integer reasoning tokens)\n" : ""}` || undefined
         : undefined,
     };
   },
